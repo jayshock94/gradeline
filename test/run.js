@@ -28,11 +28,15 @@ function makeXlsx() {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
   const page = await ctx.newPage();
   const errors = [];
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
+  // console "Failed to load resource" lines carry no URL, so network failures are tracked per request instead
+  page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push('console: ' + m.text()); });
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  page.on('requestfailed', r => { const host = new URL(r.url()).hostname; if (!FONT_HOSTS.includes(host)) errors.push('request failed: ' + r.url() + ' ' + (r.failure() ? r.failure().errorText : '')); });
   await page.route('**/*', route => {
     const u = new URL(route.request().url());
-    if (u.hostname === 'fonts.googleapis.com') return localFonts ? route.fulfill({ status: 200, contentType: 'text/css', body: fontCss }) : route.continue();
+    if (u.hostname === 'fonts.googleapis.com' && localFonts) return route.fulfill({ status: 200, contentType: 'text/css', body: fontCss });
+    if (FONT_HOSTS.includes(u.hostname)) return route.continue(); // real Google Fonts when no local copies (CI)
     if (u.hostname !== 'local.test') return route.abort();
     if (u.pathname.startsWith('/__fonts/')) return route.fulfill({ status: 200, contentType: 'font/woff2', body: fs.readFileSync(path.join(vendor, path.basename(u.pathname))) });
     let p = path.join(DIST, u.pathname);
