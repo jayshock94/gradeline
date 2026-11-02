@@ -1,0 +1,75 @@
+# Gradeline
+
+Estimating and bidding for heavy civil contractors. Pay items, crews and production rates, sub and supplier quotes side by side, bid-day markup with locked prices, checks that run as you type, full undo with a shared history, a bid form and a QuickBooks export.
+
+Built on the Gradeline design system (a fork of a Material 3 system), so every screen stays on brand.
+
+## What is in the box
+
+| Folder | What |
+|---|---|
+| `src/app/` | The app: data model (`calc.js`), screens, the estimate workspace, the two stores (`store-local.js` for the demo, `store-cloud.js` for signed-in companies) |
+| `src/pages/` | Sign-in, first-run company setup, company and team settings |
+| `src/ds/` | The design system runtime (tokens, components), vendored from the Gradeline design system |
+| `supabase/migrations/` | The database: tables, security rules, live updates, onboarding and save functions |
+| `test/run.js` | End-to-end check of the production build in demo mode |
+
+Two ways to run it:
+
+- **Demo** (`/demo`): a sample company in your browser. No account, nothing to set up.
+- **Cloud** (`/app`): sign in with Google or an emailed link, create your company, invite your team. Everything saves to Supabase, two people can work on one estimate at once, and every change is in a shared history you can undo or jump back to.
+
+## Run it locally
+
+```bash
+npm install
+npm run dev        # http://localhost:5173  (demo works right away; /app needs the env vars below)
+npm run build && npm test   # production build + headless browser checks
+```
+
+## Set up the cloud version (about 20 minutes, all free tiers)
+
+### 1. Supabase (database and sign-in)
+
+1. Go to supabase.com, create a project called `gradeline` (pick the region closest to you; save the database password somewhere).
+2. Open **SQL Editor**, paste the whole of `supabase/migrations/0001_init.sql`, run it. It creates every table, the security rules and the functions.
+3. **Authentication › Providers › Email**: leave it on. Turn **off** "Confirm email" is not needed; the app uses sign-in links (magic links), which Supabase sends for you.
+4. **Authentication › Providers › Google**: turn it on. It needs a Google OAuth client:
+   - In Google Cloud Console, create a project, go to **APIs & Services › Credentials › Create credentials › OAuth client ID**, type **Web application**.
+   - Authorized redirect URI: the **Callback URL** Supabase shows on the Google provider page (it looks like `https://xxxx.supabase.co/auth/v1/callback`).
+   - Copy the client ID and secret into the Supabase Google provider page and save.
+5. **Authentication › URL Configuration**: set **Site URL** to your Vercel address (for example `https://gradeline.vercel.app`) and add these **Redirect URLs**: `https://gradeline.vercel.app/app`, `http://localhost:5173/app`.
+6. **Project Settings › API**: copy the **Project URL** and the **anon public** key. Those are the two env vars.
+
+### 2. Vercel (hosting)
+
+1. On vercel.com, **Add New › Project › Import** this GitHub repo. Framework preset: **Vite**. Keep the defaults.
+2. **Environment Variables**: add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` with the values from step 1.6.
+3. Deploy. Every push to `main` deploys again on its own.
+
+### 3. First sign-in
+
+Open the site, **Sign in**, create your company (choose *Starter rates*, *Sample company* or *Empty*), then **Account › Company and team** to invite people by email. An invited person signs in with that same email and lands in your company.
+
+## Roles
+
+- **Owner**: everything, plus the team and the company name.
+- **Estimator**: change anything in bids, estimates and the library.
+- **Viewer**: read only.
+
+## How saving works
+
+Each company's cost library is one document; each bid has one estimate document. Saves are version-checked on the server (`save_scope`): if someone else saved first, the app refetches and applies your change on top. Every save writes a history row with a snapshot, which is what undo, redo and "jump back" use, for everyone, and it survives reloads. Live updates come over Supabase Realtime; presence shows who else has the estimate open.
+
+## Exports
+
+- **Bid form**: HTML, prints from the browser.
+- **QuickBooks Online**: CSV, one line per pay item with product/service, quantity, rate and amount, plus the cost split.
+- **QuickBooks Desktop**: IIF with one Estimate transaction (File › Utilities › Import › IIF Files).
+- **Spectrum, Vista, Sage 300 CRE**: CSV budget by phase and cost type.
+
+The QuickBooks files follow the documented formats but have not yet been run through a live QuickBooks company. First real import is the test.
+
+## Design system
+
+The runtime in `src/ds/` is generated from the Gradeline design system artifact. To change colors, type or components, change the design system and re-vendor `tokens.css`, `bundle.css` and `bundle.js`; don't hand-edit them here.
