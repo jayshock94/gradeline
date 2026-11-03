@@ -17,6 +17,13 @@ export function LoginPage(p) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const redirect = window.location.origin + '/app';
+  // show Google only when it is switched on in Supabase (Authentication › Providers)
+  const [googleOn, setGoogleOn] = useState(false);
+  useEffect(() => {
+    const url = import.meta.env.VITE_SUPABASE_URL, key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!url || !key) return;
+    fetch(url + '/auth/v1/settings', { headers: { apikey: key } }).then(r => r.ok ? r.json() : null).then(j => { if (j && j.external && j.external.google) setGoogleOn(true); }).catch(() => {});
+  }, []);
   async function google() {
     setBusy(true); setErr(null);
     const { error } = await p.supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: redirect } });
@@ -39,12 +46,12 @@ export function LoginPage(p) {
         h(M.Button, { variant: 'text', onClick: () => setSent(false) }, 'Use a different email'))
       : h(Frag, null,
         h('h1', { className: 'headline-small' }, 'Sign in'),
-        h('p', { className: 'body-medium gl-dim' }, 'No passwords. Use your Google account, or get a one-time link by email.'),
-        h(M.Button, { variant: 'filled', size: 'm', icon: 'login', disabled: busy, onClick: google, className: 'gl-auth__google' }, 'Continue with Google'),
-        h('div', { className: 'gl-auth__or' }, h('span', null, 'or')),
+        h('p', { className: 'body-medium gl-dim' }, googleOn ? 'No passwords. Use your Google account, or get a one-time link by email.' : 'No passwords. Enter your email and we send you a one-time sign-in link.'),
+        googleOn ? h(M.Button, { variant: 'filled', size: 'm', icon: 'login', disabled: busy, onClick: google, className: 'gl-auth__google' }, 'Continue with Google') : null,
+        googleOn ? h('div', { className: 'gl-auth__or' }, h('span', null, 'or')) : null,
         h('form', { onSubmit: magic, className: 'gl-auth__form' },
           h(M.TextField, { variant: 'outlined', label: 'Work email', type: 'email', value: email, onChange: setEmail, autoComplete: 'email', className: 'gl-auth__field', required: true }),
-          h(M.Button, { variant: 'tonal', size: 'm', icon: 'mail', disabled: busy, type: 'submit' }, 'Email me a sign-in link')),
+          h(M.Button, { variant: googleOn ? 'tonal' : 'filled', size: 'm', icon: 'mail', disabled: busy, type: 'submit' }, busy ? 'Sending…' : 'Email me a sign-in link')),
         err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
         h(M.Divider, null),
         h('p', { className: 'body-small gl-dim' }, 'Just looking? ', h('a', { href: '/demo', className: 'gl-link' }, 'Open the demo'), ' with a sample company. Nothing to sign up for.'))));
