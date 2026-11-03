@@ -1,6 +1,10 @@
 import { PGlite } from '@electric-sql/pglite';
+// Runs the migrations in PGlite (real Postgres, in process) with a small stand-in for Supabase auth, then checks the security rules.
+// Usage: node test/db.mjs
 import fs from 'node:fs';
-const M = '/home/claude/gradeline/supabase/migrations/';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const M = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'supabase', 'migrations') + path.sep;
 const db = new PGlite();
 const q = (s, p) => db.query(s, p);
 let fails = 0;
