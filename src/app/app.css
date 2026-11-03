@@ -98,6 +98,8 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-pkg__notes { color: var(--on-surface-variant); flex-basis: 100%; }
 .gl-qhead { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .gl-qhead__name { color: var(--on-surface); font-weight: 500; }
+.gl-qhead__row { display: inline-flex; align-items: center; gap: 2px; }
+.m3-grid__tr.is-selected .gl-dim, .m3-grid__tr.is-selected .gl-srcicon { color: var(--on-secondary-container); }
 .gl-vs { font-size: 12px; letter-spacing: 0.4px; }
 .gl-vs.is-under { color: var(--success); } .gl-vs.is-over { color: var(--warning); }
 
@@ -246,3 +248,18 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 
 .gl-filebtn { position: relative; cursor: pointer; }
 .gl-filebtn:has(:focus-visible) { outline: var(--focus-ring-width) solid var(--secondary); outline-offset: 2px; }
+
+/* quote entry */
+.gl-quotelines { display: flex; flex-direction: column; gap: var(--space-2); }
+.gl-quoteline { display: grid; grid-template-columns: minmax(0, 1fr) 220px 110px; align-items: center; gap: var(--space-3); }
+.gl-quoteline__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gl-quoteline__ext { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .gl-quoteline { grid-template-columns: 1fr; } .gl-quoteline__ext { text-align: left; } }
+
+/* crew builder */
+.gl-crewrows { display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; }
+.gl-crewrow { display: grid; grid-template-columns: 110px minmax(180px, 1fr) 90px 40px; align-items: center; gap: var(--space-3); width: 100%; }
+.gl-crewrow__rate { text-align: right; font-variant-numeric: tabular-nums; }
+.gl-field--count { width: 110px; }
+.gl-crewtotal { display: flex; flex-wrap: wrap; gap: var(--space-5); align-items: baseline; padding: var(--space-3) var(--space-4); border-radius: var(--corner-medium); background: var(--surface-container); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .gl-crewrow { grid-template-columns: 90px 1fr 40px; } .gl-crewrow__rate { display: none; } }

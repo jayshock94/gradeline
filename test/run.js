@@ -62,7 +62,7 @@ function makeXlsx() {
   await page.waitForTimeout(300);
   const total = () => page.locator('.gl-kpi__value').first().innerText();
   const t0 = await total();
-  await page.getByRole('button', { name: 'Edit Quantity' }).nth(3).click();
+  await page.getByRole('button', { name: /^Quantity, / }).nth(3).click();
   await page.keyboard.press('Control+A'); await page.keyboard.type('20000'); await page.keyboard.press('Enter');
   await page.waitForTimeout(200);
   const t1 = await total();
@@ -74,21 +74,44 @@ function makeXlsx() {
   check((await total()) === t1, 'redo re-applies it');
   await shot('02-sheet');
 
-  // lock a price by typing it
-  await page.getByRole('button', { name: 'Edit Unit price' }).nth(7).click();
-  await page.keyboard.press('Control+A'); await page.keyboard.type('95'); await page.keyboard.press('Enter');
+  // typing a digit into a cell edits it; it never switches tabs
+  await page.getByRole('button', { name: /^Quantity, / }).nth(2).focus();
+  await page.keyboard.press('2'); await page.waitForTimeout(150);
+  check((await page.locator('.m3-grid__input').count()) === 1 && (await page.locator('.gl-sheet').count()) === 1, 'typing "2" in a quantity cell starts editing instead of switching tabs');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(100);
+
+  // lock a price by typing it; the row's quantity stays editable
+  const qtyCells = await page.getByRole('button', { name: /^Quantity, / }).count();
+  await page.getByRole('button', { name: /^Unit price, / }).nth(7).click();
+  await page.keyboard.press('Control+A'); await page.keyboard.type('95.126'); await page.keyboard.press('Enter');
   await page.waitForTimeout(250);
   check((await page.locator('.m3-grid__lock').count()) === 1, 'typing a unit price locks it');
+  check((await page.getByRole('button', { name: /^Quantity, / }).count()) === qtyCells, 'a locked row keeps its quantity editable');
+  check((await page.getByText('$95.13').count()) >= 1, 'a typed price is kept to the cent ($95.13)');
 
   // quotes, checks, bid day
   await page.getByRole('tab', { name: 'Quotes' }).click();
   await page.getByRole('button', { name: /Timp Precast ·/ }).click(); await page.waitForTimeout(200);
   check((await page.getByText(/is \$[\d,]+ lower than your pick/).count()) === 1, 'picking a higher quote shows the cheaper one');
+  // a phoned-in quote, typed by hand from a company not in the library
+  await page.getByRole('button', { name: 'Add quote' }).first().click();
+  await page.getByRole('dialog').getByRole('combobox').first().selectOption('__new');
+  await page.getByLabel('Company name').fill('Wasatch Pipe Supply');
+  await page.getByRole('dialog').getByLabel('Unit price').first().fill('41.5');
+  await page.getByRole('button', { name: 'Save quote' }).click(); await page.waitForTimeout(250);
+  check((await page.getByText('Wasatch Pipe Supply').count()) >= 1, 'a quote can be entered by hand, with a new company');
   await shot('03-quotes');
   await page.getByRole('tab', { name: 'Checks' }).click();
   await page.getByRole('button', { name: 'Go to' }).first().click(); await page.waitForTimeout(200);
   check((await page.locator('.m3-grid__tr.is-selected').count()) === 1, 'check "Go to" selects the row');
   await page.getByRole('tab', { name: 'Bid day' }).click();
+  // markup saves once, when you leave the box
+  const oh = page.getByRole('textbox', { name: 'Overhead' });
+  await oh.click(); await page.keyboard.press('Control+A'); await page.keyboard.type('10'); await page.waitForTimeout(100);
+  const midTile = await page.getByText('Overhead 10%').count();
+  await page.keyboard.press('Tab'); await page.waitForTimeout(200);
+  check(midTile === 0 && (await page.getByText('Overhead 10%').count()) === 1, 'markup saves once, when you leave the box');
+  await page.getByRole('textbox', { name: 'Overhead' }).fill('6'); await page.keyboard.press('Enter'); await page.waitForTimeout(200);
   await page.getByLabel('Target total').fill('2300000');
   await page.getByRole('button', { name: 'Balance' }).click(); await page.waitForTimeout(300);
   check((await total()) === '$2,300,000', 'balance hits the target exactly (' + (await total()) + ')');
@@ -132,9 +155,32 @@ function makeXlsx() {
   await page.getByRole('button', { name: /Add 1 pay item/ }).click(); await page.waitForTimeout(200);
   fs.unlinkSync(csvFile);
 
-  // library, insights, settings menu, theme, phone width
+  // library: rates from their parts, a crew built from people and machines
   await page.getByRole('button', { name: 'Library' }).click(); await page.waitForTimeout(200);
   check((await page.getByRole('tab', { name: 'Crews' }).count()) === 1, 'library renders');
+  await page.getByRole('tab', { name: 'Equipment' }).click();
+  await page.getByRole('button', { name: 'Add machine' }).click();
+  await page.getByRole('dialog').getByLabel('Machine').fill('Test roller');
+  await page.getByRole('dialog').getByLabel('Ownership').fill('20');
+  await page.getByRole('dialog').getByLabel('Operating').fill('10');
+  await page.getByRole('dialog').getByLabel('Fuel').fill('5.5');
+  await page.getByRole('dialog').getByRole('button', { name: 'Add', exact: true }).click(); await page.waitForTimeout(200);
+  check((await page.getByRole('row', { name: /Test roller/ }).getByText('$35.50').count()) === 1, 'a machine rate is ownership + operating + fuel ($35.50)');
+  await page.getByRole('tab', { name: 'Labor' }).click();
+  const rateBefore = await page.getByRole('row').nth(1).innerText();
+  await page.getByRole('button', { name: /^Base wage, / }).first().click();
+  await page.keyboard.type('40'); await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+  const rateMatch = rateBefore.match(/\$[\d,]+\.\d\d/g);
+  check(rateMatch && (await page.getByRole('row').nth(1).innerText()).includes(rateMatch[0]), 'adding a base wage keeps the burdened rate (burden worked out)');
+  await page.getByRole('tab', { name: 'Crews' }).click();
+  await page.getByRole('button', { name: 'Add crew' }).click();
+  await page.getByRole('dialog').getByLabel('Crew name').fill('Test crew');
+  await page.getByRole('button', { name: 'Add people' }).click();
+  await page.getByRole('button', { name: 'Add machine' }).click();
+  check((await page.getByText(/Crew day \$[\d,]+ · 1 people/).count()) === 1, 'the crew builder adds up the day rate');
+  await page.getByRole('dialog').getByRole('button', { name: 'Add crew' }).click(); await page.waitForTimeout(200);
+  check((await page.getByRole('row', { name: /Test crew/ }).count()) === 1, 'a new crew shows in the library');
+  await shot('05b-library');
   await page.getByRole('button', { name: 'Insights' }).click(); await page.waitForTimeout(200);
   check((await page.getByText('Bids and wins by month').count()) === 1, 'insights renders');
   await page.getByRole('button', { name: 'Account' }).click();

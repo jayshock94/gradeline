@@ -805,3 +805,9 @@ button.m3-steps__btn:hover::before { opacity: var(--state-hover); }
 .m3-grid--standard .m3-grid__input { height: calc(var(--row-standard) - 8px); padding: 0 12px; }
 .m3-grid__input.is-numeric { text-align: right; }
 .m3-grid__td--labor, .m3-grid__td--equipment, .m3-grid__td--material, .m3-grid__td--sub, .m3-grid__td--other { }
+
+/* keyboard and resting affordances */
+.m3-grid__tr.is-clickable:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.m3-grid__tr.is-clickable:focus-visible .m3-grid__td { background: color-mix(in srgb, var(--primary) 8%, var(--surface-container-lowest)); }
+.m3-grid__editbtn .m3-grid__editval { text-decoration: underline dotted color-mix(in srgb, var(--on-surface-variant) 55%, transparent); text-underline-offset: 3px; }
+.m3-grid__td:last-child .m3-grid__editbtn:focus-visible { outline-offset: -2px; }

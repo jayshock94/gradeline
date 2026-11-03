@@ -5,6 +5,8 @@
 //    re-applies the change once; a second clash surfaces an error instead of saving over someone.
 //  - Every save writes a history row with a snapshot. Undo/redo/jump restore a snapshot as a NEW version
 //    (nothing is ever destroyed); a cursor tracks which snapshot is live so repeated undo walks back.
+//    Undo only steps back over your own latest change: if someone else saved after you, it stops and says so.
+//  - An edit is tied to the bid that was open when it was made, even if it waits in the queue.
 //  - Realtime: other people's saves arrive over postgres_changes; presence says who else has the estimate open.
 import * as R from 'react';
 import { GL } from './gl.js';
@@ -140,13 +142,13 @@ export function useCloudStore({ supabase, orgId, user, name }) {
   // ---------- history for the scope on screen ----------
   const scope = doc ? scopeFor(ui, doc) : null;
   async function fetchHistory(sc) {
-    const { data, error } = await supabase.from('history').select('version,entry,snapshot,created_at').eq('org_id', orgId).eq('scope', sc).order('version', { ascending: false }).limit(HISTORY_LIMIT);
+    const { data, error } = await supabase.from('history').select('version,entry,user_id,created_at').eq('org_id', orgId).eq('scope', sc).order('version', { ascending: false }).limit(HISTORY_LIMIT);
     if (error) { setNotice('Could not load the history: ' + error.message); return null; }
     return data.reverse();
   }
   function refreshHistoryIfCurrent(sc) { if (histRef.current.scope === sc) fetchHistory(sc).then(rows => { if (rows) setHist(h => h.scope === sc ? { ...h, rows, cursor: cursorFromRows(rows) } : h); }); }
   R.useEffect(() => {
-    if (!scope) return;
+    if (!scope) { setHist({ scope: null, rows: [], cursor: -1, loading: false }); return; }
     let alive = true;
     setHist({ scope, rows: [], cursor: -1, loading: true });
     fetchHistory(scope).then(rows => { if (alive && rows) setHist(h => h.scope === scope ? { ...h, rows, cursor: cursorFromRows(rows), loading: false } : h); });
@@ -168,11 +170,17 @@ export function useCloudStore({ supabase, orgId, user, name }) {
     if (error) throw error;
     return data; // new version, or null when someone else saved first
   }
+  function friendly(err) {
+    const m = (err && err.message) || String(err);
+    if (/not allowed|permission denied|row-level security/i.test(m)) return 'You can view this company but not change it. Ask an owner to make you an estimator.';
+    if (/Failed to fetch|NetworkError|network/i.test(m)) return 'Could not reach the server, so that change may not have saved. Showing the latest saved version.';
+    return m;
+  }
   class Conflict extends Error { constructor(scope) { super('conflict'); this.scope = scope; } }
 
-  async function runUpdate(fn, entry, attempt) {
+  async function runUpdate(fn, entry, attempt, ui0) {
     const snap = committed.current;
-    const base = buildDoc(snap, uiRef.current);
+    const base = buildDoc(snap, ui0);
     if (!base) return;
     const draft = clone(base);
     if (fn(draft) === false) return;
@@ -184,7 +192,7 @@ export function useCloudStore({ supabase, orgId, user, name }) {
         const v = await saveScope('library', data, e, snap.library.version);
         if (v == null) throw new Conflict('library');
         commit(c => ({ ...c, library: { data, version: v } }));
-        pushHistory('library', { version: v, entry: e, snapshot: data });
+        pushHistory('library', { version: v, entry: e, user_id: user.id });
       }
       // estimates: one row per bid
       for (const id of Object.keys(draft.estimates)) {
@@ -194,7 +202,7 @@ export function useCloudStore({ supabase, orgId, user, name }) {
         if (v == null) throw new Conflict('estimate:' + id);
         const docPart = draft.estimates[id];
         commit(c => ({ ...c, estimates: { ...c.estimates, [id]: { doc: docPart, version: v } } }));
-        pushHistory('estimate:' + id, { version: v, entry: e, snapshot: docPart });
+        pushHistory('estimate:' + id, { version: v, entry: e, user_id: user.id });
       }
       // bids: insert / update / delete against the base we started from
       if (!same(draft.bids, base.bids)) {
@@ -222,7 +230,6 @@ export function useCloudStore({ supabase, orgId, user, name }) {
           deletes.forEach(id => { delete bids[id]; delete estimates[id]; });
           return { ...c, bids, estimates };
         });
-        supabase.from('history').insert({ org_id: orgId, scope: 'bids', version: Date.now(), entry: e, snapshot: { changed: inserts.concat(updates, deletes) }, user_id: user.id }).then(() => {});
       }
       if (draft.currentBidId !== base.currentBidId) setUiState(u => ({ ...u, bidId: draft.currentBidId }));
     } catch (err) {
@@ -230,7 +237,7 @@ export function useCloudStore({ supabase, orgId, user, name }) {
         if (attempt === 0) {
           // someone saved first: take their row, then apply this change on top of it, once
           if (err.scope === 'library') await fetchLibrary(); else if (err.scope.startsWith('estimate:')) await fetchEstimate(err.scope.slice(9)); else await fetchBid(err.scope.slice(4));
-          return runUpdate(fn, entry, 1);
+          return runUpdate(fn, entry, 1, ui0);
         }
         throw new Error('Someone else saved this at the same moment. Your last change did not go through; try it again.');
       }
@@ -239,27 +246,41 @@ export function useCloudStore({ supabase, orgId, user, name }) {
   }
 
   const api = R.useMemo(() => {
-    const enqueue = job => { const p = queue.current.then(job).catch(err => { setNotice(err.message || String(err)); }); queue.current = p; return p; };
-    const update = (fn, entry) => enqueue(() => runUpdate(fn, entry, 0));
+    const resync = async () => { try { await Promise.all([fetchLibrary()].concat(uiRef.current.bidId ? [fetchEstimate(uiRef.current.bidId), fetchBid(uiRef.current.bidId)] : [])); } catch (e) { /* keep what we have */ } };
+    const enqueue = job => { const p = queue.current.then(job).catch(err => { setNotice(friendly(err)); return resync(); }); queue.current = p; return p; };
+    const update = (fn, entry) => { const ui0 = { ...uiRef.current }; return enqueue(() => runUpdate(fn, entry, 0, ui0)); };
+    const committedVersion = sc => sc === 'library' ? (committed.current.library && committed.current.library.version) : ((committed.current.estimates[sc.slice(9)] || {}).version);
+    // a restore only goes ahead if the history we are looking at is the latest; otherwise refresh it and stop
+    async function current(h) {
+      const last = h.rows[h.rows.length - 1];
+      if (last && last.version === committedVersion(h.scope)) return true;
+      const rows = await fetchHistory(h.scope);
+      if (rows) setHist(x => x.scope === h.scope ? { ...x, rows, cursor: cursorFromRows(rows) } : x);
+      throw new Error('Someone just changed this. The history is up to date now; check it, then try again.');
+    }
     async function restore(row, title) {
       const h = histRef.current; if (!h.scope || !row) return;
+      await current(h);
+      const { data: snapRow, error } = await supabase.from('history').select('snapshot').eq('org_id', orgId).eq('scope', h.scope).eq('version', row.version).single();
+      if (error) throw error;
+      const snapshot = snapRow.snapshot;
       const e = entryWith({ title, detail: row.entry && row.entry.title ? 'back to: ' + row.entry.title : '', icon: 'history', restoreOf: row.version });
-      if (h.scope === 'library') {
-        const v = await saveScope('library', row.snapshot, e, committed.current.library.version);
-        if (v == null) throw new Error('Someone saved first; reload and try again.');
-        commit(c => ({ ...c, library: { data: row.snapshot, version: v } })); pushHistory('library', { version: v, entry: e, snapshot: row.snapshot });
-      } else {
-        const id = h.scope.slice(9); const cur = committed.current.estimates[id];
-        const v = await saveScope(h.scope, row.snapshot, e, cur ? cur.version : 0);
-        if (v == null) throw new Error('Someone saved first; reload and try again.');
-        commit(c => ({ ...c, estimates: { ...c.estimates, [id]: { doc: row.snapshot, version: v } } })); pushHistory(h.scope, { version: v, entry: e, snapshot: row.snapshot });
-      }
+      const v = await saveScope(h.scope, snapshot, e, committedVersion(h.scope) || 0);
+      if (v == null) throw new Error('Someone saved at the same moment. Nothing was changed; check the history and try again.');
+      if (h.scope === 'library') commit(c => ({ ...c, library: { data: snapshot, version: v } }));
+      else { const id = h.scope.slice(9); commit(c => ({ ...c, estimates: { ...c.estimates, [id]: { doc: snapshot, version: v } } })); }
+      pushHistory(h.scope, { version: v, entry: e, user_id: user.id });
     }
     const prevStep = h => { for (let i = h.cursor - 1; i >= 0; i--) if (!isRestore(h.rows[i])) return i; return -1; };
     const nextStep = h => { for (let i = h.cursor + 1; i < h.rows.length; i++) if (!isRestore(h.rows[i])) return i; return -1; };
     return {
       update,
-      undo: () => enqueue(() => { const h = histRef.current; const i = prevStep(h); if (i < 0) return; return restore(h.rows[i], 'Undid ' + ((h.rows[h.cursor] && h.rows[h.cursor].entry.title) || 'a change').toLowerCase()); }),
+      undo: () => enqueue(() => {
+        const h = histRef.current; const i = prevStep(h); if (i < 0) return;
+        const live = h.rows[h.cursor];
+        if (live && live.user_id && live.user_id !== user.id && !isRestore(live)) throw new Error((live.entry && live.entry.who ? live.entry.who : 'Someone else') + ' made the last change, so undo would erase their work. Open History to go back to an earlier version.');
+        return restore(h.rows[i], 'Undid ' + ((live && live.entry.title) || 'a change').toLowerCase());
+      }),
       redo: () => enqueue(() => { const h = histRef.current; const i = nextStep(h); if (i < 0) return; return restore(h.rows[i], 'Redid ' + (h.rows[i].entry.title || 'a change').toLowerCase()); }),
       jump: visibleIndex => enqueue(() => { const h = histRef.current; const visible = h.rows.filter(r => !isRestore(r)); const row = visible[visibleIndex]; if (!row || h.rows.indexOf(row) === h.cursor) return; return restore(row, 'Went back to an earlier version'); }),
       ui: patch => setUiState(u => ({ ...u, ...(typeof patch === 'function' ? patch(u) : patch) })),

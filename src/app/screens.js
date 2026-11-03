@@ -41,7 +41,7 @@ import * as R from 'react';
     ];
     var winRate = decided.length ? Math.round(won.length / decided.length * 100) : 0;
     return h('div', { className: 'gl-screen' },
-      ui.hideSampleNote ? null : h(M.Banner, { tone: 'neutral', compact: true, icon: 'science', onClose: function () { api.ui({ hideSampleNote: true }); } }, 'Sample data for a fictional contractor, Cascade Civil Constructors. Change anything; every change can be undone, and the account menu resets it.'),
+      ui.hideSampleNote || !p.demo ? null : h(M.Banner, { tone: 'neutral', compact: true, icon: 'science', onClose: function () { api.ui({ hideSampleNote: true }); } }, 'Sample data for a fictional contractor, Cascade Civil Constructors. Change anything; every change can be undone, and the account menu resets it.'),
       h('div', { className: 'gl-tiles' },
         h(M.StatTile, { label: 'Open bids', value: String(open.length), icon: 'folder_open', supporting: open.filter(function (b) { return b.status === 'in-progress'; }).length + ' in progress', onClick: function () { api.ui({ bidFilter: 'open' }); } }),
         h(M.StatTile, { label: 'Due this week', value: String(dueWeek.length), tone: dueWeek.length ? 'warning' : 'default', icon: 'schedule', supporting: dueWeek.length ? 'next: ' + dueWeek.sort(function (a, b) { return a.due < b.due ? -1 : 1; })[0].name.split(',')[0] : 'nothing due', onClick: function () { api.ui({ bidFilter: 'due' }); } }),
@@ -66,17 +66,17 @@ import * as R from 'react';
           h('h2', { className: 'headline-small', style: { margin: '12px 0 4px' } }, bid.name),
           h('div', { className: 'body-medium gl-dim' }, bid.owner + ' · due ' + GL.fmtDate(bid.due) + ' at ' + bid.dueTime + (bid.total ? ' · ' + GL.fmtMoney(bid.total) : '')),
           bid.lowBid ? h('div', { className: 'body-medium gl-dim' }, 'Low bid ' + GL.fmtMoney(bid.lowBid) + ' (' + ((bid.total / bid.lowBid - 1) * 100).toFixed(1) + '% spread)') : null,
-          ['won', 'lost', 'submitted', 'no-bid'].indexOf(bid.status) >= 0
+          p.demo && ['won', 'lost', 'submitted', 'no-bid'].indexOf(bid.status) >= 0
             ? h(M.EmptyState, { size: 's', icon: 'inventory_2', headline: 'This bid is archived in the sample', body: 'In the real product you would open its estimate, compare it with the actual costs, and copy items into a new bid.' })
             : h(M.EmptyState, { icon: 'post_add', headline: 'No estimate yet', body: 'Start from the owner\'s item list, paste from a spreadsheet, or copy a past bid. You can mix all three.', action: h(Frag, null,
               h(M.Button, { icon: 'upload_file', onClick: function () { p.startEstimate(bidId, 'import'); } }, 'Paste item list'),
-              h(M.Button, { variant: 'tonal', icon: 'content_copy', onClick: function () { p.startEstimate(bidId, 'copy'); } }, 'Copy SR-7 items'),
+              doc.bids.some(function (b) { return b.id !== bidId && doc.estimates[b.id] && doc.estimates[b.id].items && doc.estimates[b.id].items.length; }) ? h(M.Button, { variant: 'tonal', icon: 'content_copy', onClick: function () { p.openDialog({ kind: 'copybid', bidId: bidId }); } }, 'Copy a past bid') : null,
               h(M.Button, { variant: 'outlined', onClick: function () { p.startEstimate(bidId, 'blank'); } }, 'Start blank')) })));
     }
     var d = p.d;
     var tab = ui.tab || 'sheet';
     var tabs = [{ value: 'sheet', label: 'Sheet', icon: 'table_rows' }, { value: 'quotes', label: 'Quotes', icon: 'request_quote', badge: d.packages.reduce(function (a, x) { return a + x.quotes.filter(function (q) { return q.status === 'pending'; }).length; }, 0) || undefined }, { value: 'bidday', label: 'Bid day', icon: 'gavel' }, { value: 'checks', label: 'Checks', icon: 'fact_check', badge: d.errors || undefined }, { value: 'form', label: 'Form', icon: 'description' }];
-    var common = { d: d, ui: ui, api: api, openDialog: p.openDialog, toggleLock: p.toggleLock, deleteItem: p.deleteItem, deleteTask: p.deleteTask, toast: p.toast, canUndo: p.canUndo, canRedo: p.canRedo, setBidStatus: p.setBidStatus, downloadForm: p.downloadForm, focusPackageId: ui.focusPackageId };
+    var common = { d: d, ui: ui, api: api, demo: p.demo, company: p.company, openDialog: p.openDialog, toggleLock: p.toggleLock, deleteItem: p.deleteItem, deleteTask: p.deleteTask, toast: p.toast, canUndo: p.canUndo, canRedo: p.canRedo, setBidStatus: p.setBidStatus, downloadForm: p.downloadForm, focusPackageId: ui.focusPackageId };
     var content = tab === 'sheet' ? h(GL.SheetTab, common) : tab === 'quotes' ? h(GL.QuotesTab, common) : tab === 'bidday' ? h(GL.BidDayTab, common) : tab === 'checks' ? h(GL.ChecksTab, common) : h(GL.FormTab, common);
     var wide = width >= 1200;
     var showPane = wide ? (ui.paneOpen != null ? ui.paneOpen : width >= 1500) : !!ui.paneModal;
@@ -100,47 +100,106 @@ import * as R from 'react';
   }
 
   /* ---------- Library screen ---------- */
+  var SYSTEMS = { qbo: 'QuickBooks Online', qbd: 'QuickBooks Desktop', spectrum: 'Viewpoint Spectrum', vista: 'Viewpoint Vista', sage: 'Sage 300 CRE' };
+  GL.SYSTEMS = SYSTEMS;
+  // How many crews, tasks and quotes point at a library record (so a delete never leaves a hole in an estimate)
+  function usedBy(doc, kind, id) {
+    var n = 0, lib = doc.library;
+    if (kind === 'labor' || kind === 'equipment') lib.crews.forEach(function (c) { (c[kind] || []).forEach(function (x) { if (x[0] === id) n++; }); });
+    Object.keys(doc.estimates).forEach(function (k) {
+      var e = doc.estimates[k] || {};
+      (e.tasks || []).forEach(function (t) { if ((kind === 'crews' && t.crewId === id) || (kind === 'materials' && t.matId === id)) n++; });
+      (e.packages || []).forEach(function (pk) {
+        if (pk.selfPerform && ((kind === 'crews' && pk.selfPerform.crewId === id) || (kind === 'materials' && pk.selfPerform.matId === id))) n++;
+        (pk.quotes || []).forEach(function (q) { if (kind === 'vendors' && q.vendorId === id) n++; });
+      });
+    });
+    return n;
+  }
   function LibraryScreen(p) {
     var doc = p.doc, ui = p.ui, api = p.api, lib = doc.library;
     var tab = ui.libTab || 'crews';
     var d = p.d;
-    function editRate(list, label, unit) {
-      return function (row, col, value) {
-        var cur = lib[list].find(function (x) { return x.id === row.id; });
-        api.update(function (dd) { var x = dd.library[list].find(function (y) { return y.id === row.id; }); x[col.key] = value; }, { title: 'Changed ' + cur.name + ' ' + (col.key === 'rate' ? 'rate' : col.key), detail: GL.fmtMoney(cur[col.key], 2) + ' → ' + GL.fmtMoney(value, 2) + unit, icon: 'price_change' });
-        p.toast(cur.name + ' updated. Every estimate that uses it re-priced.', 'Undo', api.undo);
-      };
+    var menu = GL.useMenu();
+    function remove(kind, rec) {
+      var n = usedBy(doc, kind, rec.id);
+      if (n) { p.toast(rec.name + ' is used in ' + n + ' place' + (n > 1 ? 's' : '') + '. Change those first, then delete it.'); return; }
+      api.update(function (dd) { dd.library[kind] = dd.library[kind].filter(function (x) { return x.id !== rec.id; }); }, { title: 'Deleted ' + rec.name + ' from the library', icon: 'delete' });
+      p.toast('Deleted ' + rec.name + '.', 'Undo', api.undo);
     }
+    function actions(kind) {
+      return { key: 'actions', header: '', width: 48, align: 'center', render: function (r) {
+        var rec = lib[kind].find(function (x) { return x.id === r.id; });
+        return h(M.IconButton, { icon: 'more_vert', label: 'Actions for ' + r.name, size: 'xs', onClick: function (e) { e.stopPropagation(); menu.open(e, [{ icon: 'edit', label: 'Edit', onClick: function () { p.openDialog({ kind: 'libedit', target: kind, id: r.id }); } }, { divider: true }, { icon: 'delete', label: 'Delete', onClick: function () { remove(kind, rec); } }], 'Actions'); } });
+      } };
+    }
+    // one field on one record; labor and equipment keep `rate` in step with its parts
+    function setField(kind, r, key, value) {
+      if (value == null || value === '' || isNaN(value)) return;
+      if (value < 0) { p.toast('Rates cannot be negative.'); return; }
+      var cur = lib[kind].find(function (x) { return x.id === r.id; });
+      var names = { wage: 'base wage', burden: 'burden', rate: 'rate', own: 'ownership', op: 'operating cost', fuel: 'fuel', cost: 'cost', hours: 'hours per day' };
+      api.update(function (dd) {
+        var x = dd.library[kind].find(function (y) { return y.id === r.id; });
+        if (kind === 'labor' && key === 'wage' && x.wage == null) x.burden = x.rate && value ? Math.max(0, Math.round((x.rate / value - 1) * 10000) / 100) : 0; // keep today's rate
+        if (kind === 'equipment' && (key === 'own' || key === 'op' || key === 'fuel') && x.own == null && x.op == null && x.fuel == null) { x.own = 0; x.op = 0; x.fuel = 0; }
+        x[key] = value;
+        if (kind === 'labor') x.rate = GL.laborRate(x);
+        if (kind === 'equipment') x.rate = GL.equipRate(x);
+      }, { title: 'Changed ' + cur.name + ' ' + (names[key] || key), detail: key === 'burden' ? (cur.burden || 0) + '% → ' + value + '%' : GL.fmtMoney(cur[key] != null ? cur[key] : 0, 2) + ' → ' + GL.fmtMoney(value, 2), icon: 'price_change' });
+      p.toast(cur.name + ' updated. Every estimate that uses it re-priced.', 'Undo', api.undo);
+    }
+    var money2 = function (key, header, hint, editable) { return { key: key, header: header, hint: hint, type: 'money', decimals: 2, width: 120, editable: editable, placeholder: '–' }; };
     var grids = {
-      crews: h(M.DataGrid, { label: 'Crews', density: 'standard', rows: lib.crews.map(function (c) { var r = d.crewRates[c.id]; return { id: c.id, name: c.name, people: c.labor.reduce(function (a, x) { return a + x[1]; }, 0), makeup: c.labor.map(function (x) { var l = lib.labor.find(function (y) { return y.id === x[0]; }); return x[1] + ' ' + (l ? l.name.toLowerCase() : '?'); }).join(', '), iron: c.equipment.map(function (x) { var e = lib.equipment.find(function (y) { return y.id === x[0]; }); return (x[1] > 1 ? x[1] + ' × ' : '') + (e ? e.name : '?'); }).join(', '), hours: c.hours, laborDay: r.laborPerDay, equipDay: r.equipPerDay, perDay: r.perDay }; }), columns: [
-        { key: 'name', header: 'Crew', width: 170 }, { key: 'makeup', header: 'People', width: 280 }, { key: 'iron', header: 'Equipment', width: 320 },
-        { key: 'hours', header: 'Hours/day', type: 'number', width: 100, editable: true }, { key: 'laborDay', header: 'Labor/day', type: 'money', category: 'labor', width: 110 }, { key: 'equipDay', header: 'Equip/day', type: 'money', category: 'equipment', width: 110 }, { key: 'perDay', header: 'Crew/day', type: 'money', width: 110 }],
-        onEdit: function (row, col, value) { api.update(function (dd) { dd.library.crews.find(function (c) { return c.id === row.id; }).hours = value; }, { title: 'Set ' + row.name + ' to ' + value + ' hours/day', icon: 'schedule' }); } }),
-      labor: h(M.DataGrid, { label: 'Labor rates', density: 'standard', rows: lib.labor.map(function (l) { return { id: l.id, name: l.name, rate: l.rate, day: l.rate * 8 }; }), columns: [{ key: 'name', header: 'Classification', width: 240 }, { key: 'rate', header: 'Burdened rate', hint: 'per hour', type: 'money', decimals: 2, width: 140, editable: true }, { key: 'day', header: '8-hour day', type: 'money', width: 120 }], onEdit: editRate('labor', 'rate', '/h') }),
-      equipment: h(M.DataGrid, { label: 'Equipment rates', density: 'standard', rows: lib.equipment.map(function (e) { return { id: e.id, name: e.name, rate: e.rate, day: e.rate * 8 }; }), columns: [{ key: 'name', header: 'Machine', width: 260 }, { key: 'rate', header: 'Rate incl. fuel', hint: 'per hour', type: 'money', decimals: 2, width: 140, editable: true }, { key: 'day', header: '8-hour day', type: 'money', width: 120 }], onEdit: editRate('equipment', 'rate', '/h') }),
-      materials: h(M.DataGrid, { label: 'Materials', density: 'standard', rows: lib.materials.map(function (m) { return { id: m.id, name: m.name, unit: m.unit, cost: m.cost }; }), columns: [{ key: 'name', header: 'Material', width: 260 }, { key: 'unit', header: 'Unit', width: 80, align: 'center' }, { key: 'cost', header: 'Cost', type: 'money', decimals: 2, width: 120, editable: true }], onEdit: editRate('materials', 'cost', '') }),
-      vendors: h(M.DataGrid, { label: 'Subs and suppliers', density: 'standard', rows: lib.vendors.map(function (v) { return { id: v.id, name: v.name, trade: v.trade, kind: v.kind, contact: v.contact, email: v.email }; }), columns: [{ key: 'name', header: 'Company', width: 220 }, { key: 'trade', header: 'Trade', width: 180 }, { key: 'kind', header: 'Type', width: 100, render: function (r) { return r.kind === 'sub' ? 'Subcontractor' : 'Supplier'; } }, { key: 'contact', header: 'Contact', width: 150 }, { key: 'email', header: 'Email', width: 260 }] })
+      crews: h(M.DataGrid, { label: 'Crews', density: 'standard', rows: lib.crews.map(function (c) { var r = d.crewRates[c.id] || GL.crewRate(c, lib); return { id: c.id, name: c.name, makeup: c.labor.map(function (x) { var l = lib.labor.find(function (y) { return y.id === x[0]; }); return x[1] + ' ' + (l ? l.name.toLowerCase() : '?'); }).join(', '), iron: c.equipment.map(function (x) { var e = lib.equipment.find(function (y) { return y.id === x[0]; }); return x[1] + ' ' + (e ? e.name : '?'); }).join(', '), hours: c.hours || 8, laborDay: r.laborPerDay, equipDay: r.equipPerDay, perDay: r.perDay }; }), columns: [
+        { key: 'name', header: 'Crew', width: 170 }, { key: 'makeup', header: 'People', width: 220 }, { key: 'iron', header: 'Equipment', width: 240 },
+        { key: 'hours', header: 'Hours/day', type: 'number', width: 96, editable: true }, { key: 'laborDay', header: 'Labor/day', type: 'money', category: 'labor', width: 108 }, { key: 'equipDay', header: 'Equip/day', type: 'money', category: 'equipment', width: 108 }, { key: 'perDay', header: 'Crew/day', type: 'money', width: 108 }, actions('crews')],
+        emptyText: 'No crews yet. Add one: pick the people and machines, and the day rate adds up.',
+        onEdit: function (row, col, value) { if (!(value > 0) || value > 24) { p.toast('Hours per day go from 1 to 24.'); return; } api.update(function (dd) { dd.library.crews.find(function (c) { return c.id === row.id; }).hours = value; }, { title: 'Set ' + row.name + ' to ' + value + ' hours/day', icon: 'schedule' }); } }),
+      labor: h(M.DataGrid, { label: 'Labor rates', density: 'standard', rows: lib.labor.map(function (l) { var rate = GL.laborRate(l); return { id: l.id, name: l.name, wage: l.wage, burden: l.wage != null ? l.burden || 0 : null, rate: rate, day: rate * 8, built: l.wage != null }; }), columns: [
+        { key: 'name', header: 'Classification', width: 220 },
+        money2('wage', 'Base wage', 'per hour', true),
+        { key: 'burden', header: 'Burden', hint: 'taxes, insurance, fringe', type: 'percent', decimals: 1, width: 130, placeholder: '–', editable: function (r) { return r.built; } },
+        money2('rate', 'Burdened rate', 'per hour', function (r) { return !r.built; }),
+        { key: 'day', header: '8-hour day', type: 'money', width: 110 }, actions('labor')],
+        emptyText: 'No labor classes yet. Add them or paste them from your spreadsheet.',
+        onEdit: function (row, col, value) { setField('labor', row, col.key, value); } }),
+      equipment: h(M.DataGrid, { label: 'Equipment rates', density: 'standard', rows: lib.equipment.map(function (e) { var rate = GL.equipRate(e); var built = e.own != null || e.op != null || e.fuel != null; return { id: e.id, name: e.name, own: built ? e.own || 0 : null, op: built ? e.op || 0 : null, fuel: built ? e.fuel || 0 : null, rate: rate, day: rate * 8, built: built }; }), columns: [
+        { key: 'name', header: 'Machine', width: 220 },
+        money2('own', 'Ownership', 'per hour', true), money2('op', 'Operating', 'repairs, wear', true), money2('fuel', 'Fuel', 'per hour', true),
+        money2('rate', 'Hourly rate', 'total', function (r) { return !r.built; }),
+        { key: 'day', header: '8-hour day', type: 'money', width: 110 }, actions('equipment')],
+        emptyText: 'No machines yet. Add them or paste them from your spreadsheet.',
+        onEdit: function (row, col, value) { setField('equipment', row, col.key, value); } }),
+      materials: h(M.DataGrid, { label: 'Materials', density: 'standard', rows: lib.materials.map(function (m) { return { id: m.id, name: m.name, unit: m.unit, cost: m.cost }; }), columns: [{ key: 'name', header: 'Material', width: 260 }, { key: 'unit', header: 'Unit', width: 80, align: 'center' }, { key: 'cost', header: 'Cost', type: 'money', decimals: 2, width: 120, editable: true }, actions('materials')],
+        emptyText: 'No materials yet.',
+        onEdit: function (row, col, value) { setField('materials', row, 'cost', value); } }),
+      vendors: h(M.DataGrid, { label: 'Subs and suppliers', density: 'standard', rows: lib.vendors.map(function (v) { return { id: v.id, name: v.name, trade: v.trade, kind: v.kind, contact: v.contact, email: v.email, phone: v.phone }; }), columns: [{ key: 'name', header: 'Company', width: 220 }, { key: 'trade', header: 'Trade', width: 170 }, { key: 'kind', header: 'Type', width: 100, render: function (r) { return r.kind === 'supplier' ? 'Supplier' : 'Sub'; } }, { key: 'contact', header: 'Contact', width: 150 }, { key: 'phone', header: 'Phone', width: 130 }, { key: 'email', header: 'Email', width: 220 }, actions('vendors')],
+        emptyText: 'No subs or suppliers yet. Add the companies you get prices from.' })
     };
+    var anyEstimate = Object.keys(doc.estimates).some(function (k) { return doc.estimates[k] && doc.estimates[k].items && doc.estimates[k].items.length; });
+    var acct = doc.setup && typeof doc.setup.accounting === 'string' ? doc.setup.accounting : null;
     var steps = [
-      { label: 'Import your labor and equipment rates', detail: 'Paste from the spreadsheet you bid with today', state: doc.setup.rates ? 'done' : 'current' },
-      { label: 'Build your crews', detail: 'People and iron per crew; we price the day', state: doc.setup.crews ? 'done' : doc.setup.rates ? 'current' : 'todo' },
-      { label: 'Add your subs and suppliers', detail: 'They get portal links instead of PDFs', state: doc.setup.vendors ? 'done' : 'todo' },
-      { label: 'Connect accounting', detail: 'Spectrum, Vista, Sage 300 CRE or QuickBooks', state: doc.setup.accounting ? 'done' : 'current', action: h(M.Button, { variant: 'tonal', size: 'xs', onClick: function () { api.update(function (dd) { dd.setup.accounting = true; }, { title: 'Connected accounting', detail: 'Viewpoint Spectrum (sample)', icon: 'account_balance' }); p.toast('Connected to Viewpoint Spectrum (sample). Budget exports now map to its phases.'); } }, 'Connect') },
-      { label: 'Bid your first job', detail: 'Import an item list or start blank', state: doc.setup.firstBid ? 'done' : 'todo' }
+      { label: 'Enter your labor and equipment rates', detail: 'Wage plus burden, or ownership, operating and fuel. Paste them from your spreadsheet', state: lib.labor.length && lib.equipment.length ? 'done' : 'current' },
+      { label: 'Build your crews', detail: 'People and machines per crew; the day rate adds up as you go', state: lib.crews.length ? 'done' : lib.labor.length ? 'current' : 'todo' },
+      { label: 'Add your subs and suppliers', detail: 'So their quotes line up side by side', state: lib.vendors.length ? 'done' : 'todo' },
+      { label: 'Pick your accounting export', detail: acct ? SYSTEMS[acct] : 'QuickBooks Online or Desktop, Spectrum, Vista or Sage', state: acct || (p.demo && doc.setup && doc.setup.accounting) ? 'done' : 'current', action: h(M.Button, { variant: 'tonal', size: 'xs', onClick: function (e) { menu.open(e, Object.keys(SYSTEMS).map(function (k) { return { label: SYSTEMS[k], selected: acct === k, onClick: function () { api.update(function (dd) { dd.setup = Object.assign({}, dd.setup, { accounting: k }); }, { title: 'Set the accounting export to ' + SYSTEMS[k], icon: 'account_balance' }); p.toast('Budget exports default to ' + SYSTEMS[k] + '.'); } }; }), 'Accounting export'); } }, acct ? 'Change' : 'Choose') },
+      { label: 'Bid your first job', detail: 'Paste the owner\'s item list or start blank', state: anyEstimate ? 'done' : 'todo' }
     ];
     var allDone = steps.every(function (s) { return s.state === 'done'; });
+    var bar = { crews: 'A crew is people plus machines. Change a rate on the Labor or Equipment tab and every crew and estimate follows.', vendors: 'The companies you get prices from. Their quotes go in on each bid\'s Quotes tab.', labor: 'Enter a base wage and burden, or just the burdened rate. Estimates re-price right away; undo if you did not mean it.', equipment: 'Enter ownership, operating and fuel per hour, or just the hourly rate. Estimates re-price right away.', materials: 'Click a cost to change it. Estimates re-price right away; undo if you did not mean it.' }[tab];
     return h('div', { className: 'gl-screen gl-library' },
+      menu.node,
       h('div', { className: 'gl-library__main' },
         h(M.Tabs, { variant: 'secondary', value: tab, onChange: function (v) { api.ui({ libTab: v }); }, tabs: [{ value: 'crews', label: 'Crews' }, { value: 'labor', label: 'Labor' }, { value: 'equipment', label: 'Equipment' }, { value: 'materials', label: 'Materials' }, { value: 'vendors', label: 'Subs & suppliers' }], scrollable: p.width < 760 }),
         h('div', { className: 'gl-library__bar' },
-          h('div', { className: 'body-medium gl-dim' }, tab === 'crews' ? 'A crew is people plus iron. Change a rate on the Labor or Equipment tab and every crew and estimate follows.' : tab === 'vendors' ? 'Vendors get a portal link with each RFQ and quote in the browser.' : 'Click a rate to change it. Estimates re-price immediately; undo if you did not mean it.'),
+          h('div', { className: 'body-medium gl-dim' }, bar),
           h('div', { className: 'm3-row' },
-            h(M.Button, { variant: 'outlined', size: 'xs', icon: 'upload_file', onClick: function () { p.openDialog({ kind: 'import', target: tab }); } }, 'Paste from spreadsheet'),
-            h(M.Button, { variant: 'tonal', size: 'xs', icon: 'add', onClick: function () { p.openDialog({ kind: 'libadd', target: tab }); } }, 'Add'))),
+            tab === 'crews' ? null : h(M.Button, { variant: 'outlined', size: 'xs', icon: 'upload_file', onClick: function () { p.openDialog({ kind: 'import', target: tab }); } }, 'Paste from spreadsheet'),
+            h(M.Button, { variant: 'tonal', size: 'xs', icon: 'add', onClick: function () { p.openDialog({ kind: 'libedit', target: tab }); } }, { crews: 'Add crew', labor: 'Add labor class', equipment: 'Add machine', materials: 'Add material', vendors: 'Add company' }[tab]))),
         grids[tab]),
       allDone ? null : h('aside', { className: 'gl-library__side' },
-        h('div', { className: 'gl-card' }, h(M.SetupSteps, { headline: 'Set up Gradeline', steps: steps })),
-        h('div', { className: 'gl-card gl-card--quiet body-small' }, 'Setup takes an afternoon, not a quarter: the library is three flat lists and a crew builder, and the first bid can be pasted straight from the owner\'s item list.')));
+        h('div', { className: 'gl-card' }, h(M.SetupSteps, { headline: 'Set up Gradeline', steps: steps }))));
   }
 
   /* ---------- Insights screen ---------- */
@@ -167,7 +226,7 @@ import * as R from 'react';
         h(M.StatTile, { label: 'Jobs won', value: String(totalWon), spark: ins.won }),
         computed ? h(M.StatTile, { label: 'Decided by owner', value: String(ins.byOwner.length), supporting: 'owners with a result' }) : h(M.StatTile, { label: 'Avg margin on won work', value: '9.4', unit: '%', supporting: 'target 9%', tone: 'success' })),
       h('div', { className: 'gl-insights' },
-        h(GL.Section, { title: 'Bids and wins by month', subtitle: 'Every edition gets this. Nothing is locked behind an enterprise tier.' },
+        h(GL.Section, { title: 'Bids and wins by month', subtitle: 'Last 12 months, from your own bids.' },
           chart,
           h('div', { className: 'gl-legend body-small' }, h('span', null, h('i', { className: 'gl-legend__sw gl-legend__sw--bid' }), 'Submitted'), h('span', null, h('i', { className: 'gl-legend__sw gl-legend__sw--won' }), 'Won'))),
         h(GL.Section, { title: 'By owner' },
@@ -262,38 +321,106 @@ import * as R from 'react';
           v.otherMode === 'lump' ? h(GL.Field, { label: 'Lump sum', prefix: '$', value: v.amount, inputMode: 'decimal', onChange: function (x) { set('amount', x); } }) : h(GL.Field, { label: 'Cost per ' + (item ? item.unit : 'unit'), prefix: '$', value: v.perUnit, inputMode: 'decimal', onChange: function (x) { set('perUnit', x); } })) : null));
   }
 
-  function parsePaste(text, target) {
-    var lines = text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
-    var out = [];
-    lines.forEach(function (l) {
-      var parts = l.indexOf('\t') >= 0 ? l.split('\t') : l.indexOf(',') >= 0 && !/^\d/.test(l.split(',')[1] || '') ? l.split(',') : l.split(/\s{2,}|\t|,/);
-      parts = parts.map(function (s) { return s.trim(); }).filter(function (s) { return s !== ''; });
-      if (parts.length < 2) return;
+  /* ---------- Paste and file import ---------- */
+  var UNIT_RE = /^(CY|SY|SF|LF|TON|TONS|EA|EACH|LS|LUMP|AC|ACRE|GAL|HR|DAY|DAYS|MO|WK|LB|LBS|CF|MI|STA|M|M2|M3|KG|L|MGAL|CWT|SQ|VF|LNFT|SQYD|CUYD)$/i;
+  function isNum(s) { return s != null && /^\(?-?\$?[\d,]*\.?\d+\)?$/.test(String(s).trim()); }
+  function toNum(s) { return Number(String(s).replace(/[$,()\s]/g, '')); }
+  function isUnit(s) { return s != null && (UNIT_RE.test(String(s).trim()) || /^[A-Z]{1,4}\.?$/.test(String(s).trim())); }
+  function csvSplit(line) {
+    var out = [], cur = '', q = false;
+    for (var i = 0; i < line.length; i++) {
+      var ch = line[i];
+      if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+      else if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch;
+    }
+    out.push(cur); return out;
+  }
+  function splitLine(l) {
+    if (l.indexOf('\t') >= 0) return l.split('\t');
+    if (l.indexOf(',') >= 0 && (l.indexOf('"') >= 0 || l.split(',').length >= 3)) return csvSplit(l);
+    if (/\S\s{2,}\S/.test(l)) return l.split(/\s{2,}/);
+    return null; // single spaces only: handled word by word
+  }
+  var HEADS = {
+    code: /^(item|item ?(no|#|number|code)|code|no\.?|number|bid item|pay item)$/i, name: /^(description|desc|name|item description|classification|class|machine|equipment|material|company|vendor)$/i,
+    qty: /^(qty|quantity|quan|est\.? ?qty|estimated quantity|bid qty)$/i, unit: /^(unit|units|um|uom|u\/m)$/i,
+    wage: /^(wage|base wage|base rate|base|straight time|st rate)$/i, burden: /^(burden|burden ?%|burden percent|fringe|fringe ?%)$/i, rate: /^(rate|hourly|hourly rate|burdened rate|cost|total|price|unit cost)$/i,
+    own: /^(own|ownership|owning|owner ?ship cost)$/i, op: /^(op|operating|operating cost|maint|maintenance|repair|repairs)$/i, fuel: /^(fuel|fuel cost)$/i,
+    trade: /^(trade|scope)$/i, contact: /^(contact|name of contact|estimator)$/i, email: /^(email|e-mail)$/i, phone: /^(phone|tel|telephone|cell)$/i
+  };
+  function headerMap(parts) {
+    var map = {}, hits = 0;
+    parts.forEach(function (s, i) { var t = String(s).trim().replace(/[:*]+$/, ''); Object.keys(HEADS).forEach(function (k) { if (map[k] == null && HEADS[k].test(t)) { map[k] = i; hits++; } }); });
+    return hits >= 2 ? map : null;
+  }
+  // Returns { rows, skipped, dupes }. Items: code, name, qty, unit. Rates: name plus whichever of wage, burden, rate, own, op, fuel, unit were given.
+  GL.parsePaste = function (text, target, existingCodes) {
+    var lines = String(text || '').split(/\r?\n/).map(function (l) { return l.replace(/\s+$/, ''); }).filter(function (l) { return l.trim(); });
+    var rows = [], skipped = [], map = null;
+    lines.forEach(function (l, li) {
+      var parts = splitLine(l);
+      if (li === 0 || !map) { var hm = parts ? headerMap(parts) : null; if (hm) { map = hm; return; } }
       if (target === 'items') {
-        // code? name qty unit  |  name qty unit  |  name qty
-        var code = '', name, qty, unit = 'EA';
-        if (/^[0-9A-Z.\-]{3,}$/i.test(parts[0]) && parts.length >= 3) { code = parts.shift(); }
-        var nums = parts.map(function (s) { return Number(String(s).replace(/,/g, '')); });
-        var qi = -1; for (var i = parts.length - 1; i >= 1; i--) { if (!isNaN(nums[i])) { qi = i; break; } }
-        if (qi < 0) return;
-        qty = nums[qi]; name = parts.slice(0, qi).join(' '); var rest = parts.slice(qi + 1); if (rest[0]) unit = rest[0].toUpperCase();
-        if (!name) return;
-        out.push({ code: code, name: name, qty: qty, unit: unit });
+        var code = '', name = '', qty = NaN, unit = 'EA';
+        var fits = map && parts && map.qty != null && parts.length > Math.max(map.qty, map.name != null ? map.name : 0) && isNum(parts[map.qty]);
+        if (fits) {
+          code = map.code != null ? String(parts[map.code] || '').trim() : '';
+          name = String(map.name != null ? parts[map.name] || '' : '').trim();
+          qty = toNum(parts[map.qty]); unit = map.unit != null && String(parts[map.unit] || '').trim() ? String(parts[map.unit]).trim().toUpperCase() : 'EA';
+          if (!name && code && map.name == null) { name = code; code = ''; }
+        } else {
+          var tok = parts ? parts.map(function (s) { return s.trim(); }).filter(Boolean) : l.trim().split(/\s+/);
+          var qi = -1;
+          for (var i = tok.length - 2; i >= 1; i--) { if (isNum(tok[i]) && isUnit(tok[i + 1])) { qi = i; } }
+          if (qi < 0 && isNum(tok[tok.length - 1]) && tok.length >= 2) qi = tok.length - 1;
+          if (qi >= 1) {
+            qty = toNum(tok[qi]); if (tok[qi + 1] && isUnit(tok[qi + 1])) unit = tok[qi + 1].replace(/\.$/, '').toUpperCase();
+            var head = tok.slice(0, qi);
+            if (head.length >= 2 && /\d/.test(head[0]) && /^[0-9A-Z][0-9A-Z.\-]*$/i.test(head[0])) code = head.shift();
+            name = head.join(' ');
+          }
+        }
+        if (!name || isNaN(qty)) { skipped.push(l.trim()); return; }
+        rows.push({ code: code, name: name, qty: qty, unit: unit });
       } else {
-        var n = Number(String(parts[parts.length - 1]).replace(/[$,]/g, ''));
-        if (isNaN(n)) return;
-        var nm = parts.slice(0, -1).join(' ');
-        out.push({ name: nm.replace(/\s*\b(TON|CY|LF|SY|EA|GAL|AC|LS)\b\s*$/i, ''), rate: n, unit: (nm.match(/\b(TON|CY|LF|SY|EA|GAL|AC|LS)\b/i) || [])[1] });
+        var cells = parts ? parts.map(function (s) { return s.trim(); }) : null;
+        var rec = {};
+        if (map && cells) {
+          ['wage', 'burden', 'rate', 'own', 'op', 'fuel'].forEach(function (k) { if (map[k] != null && isNum(cells[map[k]])) rec[k] = toNum(String(cells[map[k]]).replace('%', '')); });
+          ['unit', 'trade', 'contact', 'email', 'phone'].forEach(function (k) { if (map[k] != null && cells[map[k]]) rec[k] = cells[map[k]]; });
+          rec.name = map.name != null ? cells[map.name] : cells.filter(function (c) { return c && !isNum(c); })[0];
+          if (target === 'vendors' && rec.name) { rows.push(rec); return; }
+        } else if (target === 'vendors') {
+          var vc = cells || l.split(/\s{2,}/);
+          if (vc[0]) { rows.push({ name: vc[0], trade: vc[1] || '', contact: vc[2] || '', email: vc[3] || '', phone: vc[4] || '' }); return; }
+        } else {
+          var t2 = cells ? cells.filter(Boolean) : l.trim().split(/\s+/);
+          var last = t2[t2.length - 1];
+          if (isNum(last)) {
+            rec.rate = toNum(last);
+            var nm = t2.slice(0, -1).join(' ');
+            var um = nm.match(/\s(TON|CY|LF|SY|EA|GAL|AC|LS)$/i); if (um) { rec.unit = um[1].toUpperCase(); nm = nm.slice(0, um.index); }
+            rec.name = nm;
+          }
+        }
+        var hasNumber = ['wage', 'rate', 'own', 'op', 'fuel'].some(function (k) { return rec[k] != null && !isNaN(rec[k]); });
+        if (!rec.name || !hasNumber) { skipped.push(l.trim()); return; }
+        rows.push(rec);
       }
     });
-    return out;
-  }
+    var seen = {}, dupes = [];
+    (existingCodes || []).forEach(function (c) { if (c) seen[c] = true; });
+    if (target === 'items') rows.forEach(function (r) { if (r.code && seen[r.code]) dupes.push(r.code); if (r.code) seen[r.code] = true; });
+    return { rows: rows, skipped: skipped, dupes: dupes };
+  };
   function ImportDialog(p) {
     var target = p.target === 'items' || !p.target ? 'items' : p.target;
-    var sample = target === 'items' ? '02316\tRoadway excavation\t18400\tCY\n02721\tUntreated base course\t9800\tTON\nHMA 1/2 in.\t11200\tTON' : target === 'labor' ? 'Foreman\t58\nOperator\t52' : target === 'equipment' ? 'Dozer D6\t118\nExcavator 336\t142' : target === 'materials' ? 'Ready-mix 4000 psi CY\t168\nTack coat GAL\t3.2' : 'Company\tTrade\tContact\tEmail';
+    var sample = target === 'items' ? 'Item\tDescription\tQty\tUnit\n02316\tRoadway excavation\t18400\tCY\n02721\tUntreated base course\t9800\tTON' : target === 'labor' ? 'Classification\tWage\tBurden\nForeman\t42.50\t38\nOperator\t38.00\t38' : target === 'equipment' ? 'Machine\tOwnership\tOperating\tFuel\nDozer D6\t62\t28\t31\nExcavator 336\t78\t32\t36' : target === 'materials' ? 'Material\tUnit\tCost\nReady-mix 4000 psi\tCY\t168\nTack coat\tGAL\t3.20' : 'Company\tTrade\tContact\tEmail\tPhone';
     var txt = useState('');
-    var parsed = parsePaste(txt[0], target === 'items' ? 'items' : 'rates');
-    var label = { items: 'pay items', labor: 'labor classes', equipment: 'machines', materials: 'materials', crews: 'crews', vendors: 'vendors' }[target];
+    var existing = target === 'items' && p.items ? p.items.map(function (i) { return i.code; }) : [];
+    var res = GL.parsePaste(txt[0], target, existing);
+    var parsed = res.rows;
+    var label = { items: 'pay items', labor: 'labor classes', equipment: 'machines', materials: 'materials', vendors: 'companies' }[target];
     var fileErr = useState(null);
     var fileName = useState('');
     function onFile(e) {
@@ -302,37 +429,180 @@ import * as R from 'react';
       GL.readSpreadsheet(file).then(function (text) { txt[1](text); }, function (err) { fileErr[1]('Could not read that file: ' + (err && err.message ? err.message : err)); });
       e.target.value = '';
     }
-    return h(M.Dialog, { headline: 'Import ' + label + ' from a spreadsheet', icon: 'content_paste', onClose: p.onClose, className: 'gl-dialog--wide', actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'), h(M.Button, { disabled: !parsed.length || target === 'crews' || target === 'vendors', onClick: function () { p.onImport(parsed, target); } }, 'Add ' + (parsed.length || '') + ' ' + (parsed.length === 1 ? label.replace(/s$/, '') : label))) },
+    var cols = target === 'items' ? [{ key: 'code', header: 'Code', width: 90 }, { key: 'name', header: 'Description', width: 260 }, { key: 'qty', header: 'Qty', type: 'number', decimals: 2, width: 100 }, { key: 'unit', header: 'Unit', width: 70, align: 'center' }]
+      : target === 'vendors' ? [{ key: 'name', header: 'Company', width: 200 }, { key: 'trade', header: 'Trade', width: 140 }, { key: 'contact', header: 'Contact', width: 130 }, { key: 'email', header: 'Email', width: 180 }]
+      : [{ key: 'name', header: 'Name', width: 220 }].concat(target === 'labor' ? [{ key: 'wage', header: 'Wage', type: 'money', decimals: 2, width: 90, placeholder: '–' }, { key: 'burden', header: 'Burden %', type: 'number', decimals: 1, width: 90, placeholder: '–' }]
+        : target === 'equipment' ? [{ key: 'own', header: 'Own', type: 'money', decimals: 2, width: 80, placeholder: '–' }, { key: 'op', header: 'Operating', type: 'money', decimals: 2, width: 90, placeholder: '–' }, { key: 'fuel', header: 'Fuel', type: 'money', decimals: 2, width: 80, placeholder: '–' }]
+        : [{ key: 'unit', header: 'Unit', width: 70, align: 'center' }]).concat([{ key: 'rate', header: target === 'materials' ? 'Cost' : 'Rate', type: 'money', decimals: 2, width: 100, placeholder: '–' }]);
+    var previewRows = parsed.map(function (r, i) { var o = Object.assign({ id: i }, r); if (target === 'labor' && r.wage != null) o.rate = GL.laborRate(r); if (target === 'equipment' && (r.own != null || r.op != null || r.fuel != null)) o.rate = GL.equipRate(r); return o; });
+    return h(M.Dialog, { headline: 'Import ' + label + ' from a spreadsheet', icon: 'content_paste', onClose: p.onClose, className: 'gl-dialog--wide', actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'), h(M.Button, { disabled: !parsed.length, onClick: function () { p.onImport(parsed, target); } }, 'Add ' + (parsed.length || '') + ' ' + (parsed.length === 1 ? { items: 'pay item', labor: 'labor class', equipment: 'machine', materials: 'material', vendors: 'company' }[target] : label))) },
       h('div', { className: 'gl-dialog__form' },
-        h('div', { className: 'body-medium' }, 'Choose an Excel or CSV file, or copy the rows in Excel or the owner\'s PDF table and paste them below. Tabs, commas or two spaces all work; header rows are skipped.'),
+        h('div', { className: 'body-medium' }, target === 'items' ? 'Choose an Excel or CSV file, or copy the rows from Excel or the owner\'s PDF and paste them below. A header row (Item, Description, Qty, Unit) lines the columns up; without one, each line needs a description, a quantity and a unit.' : 'Choose an Excel or CSV file, or copy the rows from your spreadsheet and paste them below. A header row lines the columns up' + (target === 'labor' ? ' (Classification, Wage, Burden, or Rate)' : target === 'equipment' ? ' (Machine, Ownership, Operating, Fuel, or Rate)' : target === 'materials' ? ' (Material, Unit, Cost)' : ' (Company, Trade, Contact, Email, Phone)') + '.'),
         h('div', { className: 'm3-row', style: { gap: 12 } },
           h('label', { className: 'm3-btn m3-btn--tonal m3-btn--s m3-btn--round gl-filebtn' }, h(M.Icon, { name: 'upload_file', size: 20 }), ' Choose file (.xlsx, .csv)', h('input', { type: 'file', accept: '.xlsx,.xls,.csv,.txt', onChange: onFile, style: { position: 'absolute', opacity: 0, width: 1, height: 1 } })),
           fileName[0] ? h('span', { className: 'body-small gl-dim' }, fileName[0]) : null),
         fileErr[0] ? h(M.Banner, { tone: 'error', compact: true }, fileErr[0]) : null,
         h('textarea', { className: 'gl-textarea', rows: 7, value: txt[0], placeholder: sample, 'aria-label': 'Rows to import', onChange: function (e) { txt[1](e.target.value); } }),
-        txt[0] && !parsed.length ? h(M.Banner, { tone: 'warning', compact: true }, 'Nothing parsed yet. Each line needs a description and a number' + (target === 'items' ? ', then a unit' : '') + '.') : null,
-        parsed.length ? h(M.DataGrid, { label: 'Preview', density: 'dense', rows: parsed.map(function (r, i) { return Object.assign({ id: i }, r); }), columns: target === 'items' ? [{ key: 'code', header: 'Code', width: 90 }, { key: 'name', header: 'Description' }, { key: 'qty', header: 'Qty', type: 'number', width: 100 }, { key: 'unit', header: 'Unit', width: 70, align: 'center' }] : [{ key: 'name', header: 'Name' }, { key: 'unit', header: 'Unit', width: 70, align: 'center' }, { key: 'rate', header: 'Rate', type: 'money', decimals: 2, width: 100 }] }) : null,
-        target === 'crews' || target === 'vendors' ? h('div', { className: 'body-small gl-dim' }, 'Crews and vendors are added one at a time for now.') : null));
+        txt[0] && !parsed.length ? h(M.Banner, { tone: 'warning', compact: true }, 'Nothing read yet. Each line needs a name and a number' + (target === 'items' ? ' and a unit' : '') + ', or add a header row.') : null,
+        res.skipped.length && parsed.length ? h(M.Banner, { tone: 'warning', compact: true }, res.skipped.length + ' line' + (res.skipped.length > 1 ? 's' : '') + ' skipped: ' + res.skipped.slice(0, 3).map(function (s) { return '"' + (s.length > 40 ? s.slice(0, 40) + '…' : s) + '"'; }).join(', ') + (res.skipped.length > 3 ? ' and more' : '') + '.') : null,
+        res.dupes.length ? h(M.Banner, { tone: 'warning', compact: true }, 'Item code' + (res.dupes.length > 1 ? 's ' : ' ') + res.dupes.slice(0, 5).join(', ') + (res.dupes.length > 1 ? ' appear' : ' appears') + ' twice. Check them after adding.') : null,
+        parsed.length ? h(M.DataGrid, { label: 'Preview', density: 'dense', rows: previewRows, columns: cols }) : null));
   }
 
-  function RFQDialog(p) {
+  /* ---------- Copy a past bid ---------- */
+  function CopyBidDialog(p) {
+    var opts = p.doc.bids.filter(function (b) { return b.id !== p.bidId && p.doc.estimates[b.id] && p.doc.estimates[b.id].items && p.doc.estimates[b.id].items.length; })
+      .map(function (b) { return { value: b.id, label: b.name + ' · ' + p.doc.estimates[b.id].items.length + ' items' }; });
+    var sel = useState(opts[0] ? opts[0].value : '');
+    return h(M.Dialog, { headline: 'Copy a past bid', icon: 'content_copy', onClose: p.onClose, actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'), h(M.Button, { disabled: !sel[0], onClick: function () { p.onCopy(sel[0]); } }, 'Copy items')) },
+      h('div', { className: 'gl-dialog__form' },
+        opts.length ? h(GL.Select, { label: 'Copy pay items and tasks from', value: sel[0], options: opts, onChange: sel[1] }) : h('div', { className: 'body-medium' }, 'No other bid has an estimate yet.'),
+        h('div', { className: 'body-small gl-dim' }, 'Quantities, crews and production rates come across. Quotes and locked prices do not; set them for this bid.')));
+  }
+
+  /* ---------- Quote packages and quotes ---------- */
+  function PackageDialog(p) {
     var est = p.doc.estimates[p.doc.currentBidId], lib = p.doc.library;
     var f = useState({ name: '', itemIds: [], vendorIds: [] });
     var v = f[0];
     function toggle(k, id) { var o = Object.assign({}, v); o[k] = v[k].indexOf(id) >= 0 ? v[k].filter(function (x) { return x !== id; }) : v[k].concat([id]); f[1](o); }
-    var ok = v.name.trim() && v.itemIds.length && v.vendorIds.length;
-    return h(M.Dialog, { headline: 'New request for quotes', icon: 'send', onClose: p.onClose, className: 'gl-dialog--wide', actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'), h(M.Button, { disabled: !ok, icon: 'send', onClick: function () { p.onSend(v); } }, 'Send ' + (v.vendorIds.length || '') + ' request' + (v.vendorIds.length === 1 ? '' : 's'))) },
+    var ok = v.name.trim() && v.itemIds.length;
+    return h(M.Dialog, { headline: 'New quote package', icon: 'request_quote', onClose: p.onClose, className: 'gl-dialog--wide', actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'), h(M.Button, { disabled: !ok, onClick: function () { p.onSave(v); } }, 'Create package')) },
       h('div', { className: 'gl-dialog__form' },
         h(GL.Field, { label: 'Package name', value: v.name, onChange: function (x) { f[1](Object.assign({}, v, { name: x })); }, placeholder: 'Guardrail', required: true }),
         h('div', { className: 'label-medium gl-dim' }, 'Pay items in this package'),
-        h('div', { className: 'gl-checklist' }, est.items.map(function (it) { return h(M.Checkbox, { key: it.id, label: it.code + ' ' + it.name + ' · ' + GL.fmtNum(it.qty) + ' ' + it.unit, checked: v.itemIds.indexOf(it.id) >= 0, onChange: function () { toggle('itemIds', it.id); } }); })),
-        h('div', { className: 'label-medium gl-dim' }, 'Send to'),
-        h('div', { className: 'gl-checklist' }, lib.vendors.map(function (vd) { return h(M.Checkbox, { key: vd.id, label: vd.name + ' · ' + vd.trade, checked: v.vendorIds.indexOf(vd.id) >= 0, onChange: function () { toggle('vendorIds', vd.id); } }); })),
-        h('div', { className: 'body-small gl-dim' }, 'Each vendor gets a portal link and quotes in the browser. Replies show up on the Quotes tab as they come in.')));
+        est.items.length ? h('div', { className: 'gl-checklist' }, est.items.map(function (it) { return h(M.Checkbox, { key: it.id, label: (it.code ? it.code + ' ' : '') + it.name + ' · ' + GL.fmtNum(it.qty) + ' ' + it.unit, checked: v.itemIds.indexOf(it.id) >= 0, onChange: function () { toggle('itemIds', it.id); } }); })) : h('div', { className: 'body-small gl-dim' }, 'Add pay items first.'),
+        h('div', { className: 'label-medium gl-dim' }, 'Expecting quotes from (optional)'),
+        lib.vendors.length ? h('div', { className: 'gl-checklist' }, lib.vendors.map(function (vd) { return h(M.Checkbox, { key: vd.id, label: vd.name + (vd.trade ? ' · ' + vd.trade : ''), checked: v.vendorIds.indexOf(vd.id) >= 0, onChange: function () { toggle('vendorIds', vd.id); } }); })) : h('div', { className: 'body-small gl-dim' }, 'No subs or suppliers in the library yet. You can add a company when you enter its quote.'),
+        h('div', { className: 'body-small gl-dim' }, 'Each pay item gets a sub task priced at your plug until you pick a quote. Enter quotes as they come in by phone or email.')));
+  }
+
+  function QuoteDialog(p) {
+    var pkg = p.pkg, q = p.quote, lib = p.doc.library;
+    var NEW = '__new';
+    var init = { vendorId: q ? q.vendorId || NEW : (lib.vendors[0] ? lib.vendors[0].id : NEW), newName: q && !q.vendorId ? q.vendorName || '' : '', newTrade: '', mode: q && q.lump != null ? 'lump' : 'unit', lump: q && q.lump != null ? String(q.lump) : '', prices: {}, note: q && q.note ? q.note : '' };
+    pkg.lines.forEach(function (l) { var up = q && q.lump == null && q.unitPrices ? q.unitPrices[l.itemId] : null; init.prices[l.itemId] = up != null ? String(up) : ''; });
+    var f = useState(init);
+    var v = f[0];
+    function set(k, val) { var o = Object.assign({}, v); o[k] = val; f[1](o); }
+    function setPrice(id, val) { var pr = Object.assign({}, v.prices); pr[id] = val; set('prices', pr); }
+    var total = v.mode === 'lump' ? Number(v.lump) || 0 : pkg.lines.reduce(function (a, l) { var n = Number(v.prices[l.itemId]); return a + (v.prices[l.itemId] !== '' && !isNaN(n) ? n * l.qty : 0); }, 0);
+    var filled = pkg.lines.filter(function (l) { return v.prices[l.itemId] !== '' && !isNaN(Number(v.prices[l.itemId])); }).length;
+    var vendorOk = v.vendorId !== NEW || v.newName.trim();
+    var ok = vendorOk && (v.mode === 'lump' ? Number(v.lump) > 0 : filled > 0) && !(v.mode === 'unit' && pkg.lines.some(function (l) { return v.prices[l.itemId] !== '' && (isNaN(Number(v.prices[l.itemId])) || Number(v.prices[l.itemId]) < 0); }));
+    var options = lib.vendors.map(function (x) { return { value: x.id, label: x.name + (x.trade ? ' · ' + x.trade : '') }; }).concat([{ value: NEW, label: 'A company not in the library…' }]);
+    return h(M.Dialog, { headline: (q ? 'Quote from ' + (q.vendor ? q.vendor.name : 'vendor') : 'Add quote') + ' · ' + pkg.name, icon: 'request_quote', onClose: p.onClose, className: 'gl-dialog--wide', actions: h(Frag, null,
+        q ? h(M.Button, { variant: 'text', icon: 'delete', onClick: p.onDelete, style: { marginRight: 'auto' } }, 'Remove quote') : null,
+        h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'),
+        h(M.Button, { disabled: !ok, onClick: function () {
+          var out = { vendorId: v.vendorId === NEW ? null : v.vendorId, newVendor: v.vendorId === NEW ? { name: v.newName.trim(), trade: v.newTrade.trim() } : null, note: v.note.trim() };
+          if (v.mode === 'lump') { out.lump = Math.round(Number(v.lump) * 100) / 100; out.unitPrices = null; }
+          else { out.lump = null; out.unitPrices = {}; pkg.lines.forEach(function (l) { if (v.prices[l.itemId] !== '' && !isNaN(Number(v.prices[l.itemId]))) out.unitPrices[l.itemId] = Number(v.prices[l.itemId]); }); }
+          p.onSave(out);
+        } }, 'Save quote')) },
+      h('div', { className: 'gl-dialog__form' },
+        h('div', { className: 'm3-row', style: { gap: 12, alignItems: 'flex-start' } },
+          h(GL.Select, { label: 'Company', value: v.vendorId, options: options, onChange: function (x) { set('vendorId', x); } }),
+          v.vendorId === NEW ? h(GL.Field, { label: 'Company name', value: v.newName, onChange: function (x) { set('newName', x); }, required: true }) : null,
+          v.vendorId === NEW ? h(GL.Field, { label: 'Trade', value: v.newTrade, onChange: function (x) { set('newTrade', x); }, placeholder: 'Guardrail', className: 'gl-field gl-field--short' }) : null),
+        h(M.SegmentedButton, { density: 'dense', label: 'Quoted as', value: v.mode, onChange: function (x) { set('mode', x); }, segments: [{ value: 'unit', label: 'Unit prices' }, { value: 'lump', label: 'Lump sum' }] }),
+        v.mode === 'unit' ? h('div', { className: 'gl-quotelines' }, pkg.lines.map(function (l) {
+          var n = Number(v.prices[l.itemId]);
+          return h('div', { key: l.itemId, className: 'gl-quoteline' },
+            h('span', { className: 'gl-quoteline__name body-medium' }, (l.item && l.item.code ? l.item.code + ' ' : '') + (l.item ? l.item.name : ''), h('span', { className: 'gl-dim body-small' }, ' · ' + GL.fmtNum(l.qty) + ' ' + l.unit)),
+            h(GL.Field, { label: 'Unit price', prefix: '$', suffix: '/ ' + l.unit, value: v.prices[l.itemId], inputMode: 'decimal', onChange: function (x) { setPrice(l.itemId, x); }, className: 'gl-field gl-field--money' }),
+            h('span', { className: 'gl-quoteline__ext body-medium' }, v.prices[l.itemId] !== '' && !isNaN(n) ? GL.fmtMoney(n * l.qty) : h('span', { className: 'gl-dim' }, 'no price')));
+        })) : h(GL.Field, { label: 'Lump sum for the package', prefix: '$', value: v.lump, inputMode: 'decimal', onChange: function (x) { set('lump', x); }, supportingText: 'Spread over the pay items in proportion to your plugs, so each item gets a unit price.', className: 'gl-field gl-field--money' }),
+        h(GL.Field, { label: 'Notes and exclusions', value: v.note, onChange: function (x) { set('note', x); }, placeholder: 'Excludes traffic control. Good for 30 days.' }),
+        h('div', { className: 'title-small' }, 'Quote total ' + GL.fmtMoney(total) + (pkg.plugTotal ? ' · plug ' + GL.fmtMoney(pkg.plugTotal) : '') + (v.mode === 'unit' && filled < pkg.lines.length ? ' · ' + (pkg.lines.length - filled) + ' item' + (pkg.lines.length - filled > 1 ? 's' : '') + ' not priced' : ''))));
+  }
+
+  /* ---------- Library records ---------- */
+  function CrewDialog(p) {
+    var lib = p.doc.library, c = p.crew;
+    var f = useState({ name: c ? c.name : '', hours: c ? String(c.hours || 8) : '8', labor: c ? c.labor.map(function (x) { return { id: x[0], n: String(x[1]) }; }) : [], equipment: c ? c.equipment.map(function (x) { return { id: x[0], n: String(x[1]) }; }) : [] });
+    var v = f[0];
+    function set(k, val) { var o = Object.assign({}, v); o[k] = val; f[1](o); }
+    function setRow(kind, i, k, val) { var list = v[kind].slice(); list[i] = Object.assign({}, list[i]); list[i][k] = val; set(kind, list); }
+    function addRow(kind) { var src = lib[kind]; if (!src.length) return; set(kind, v[kind].concat([{ id: src[0].id, n: '1' }])); }
+    function delRow(kind, i) { set(kind, v[kind].filter(function (_, j) { return j !== i; })); }
+    var out = { name: v.name.trim(), hours: Number(v.hours) || 8, labor: v.labor.filter(function (r) { return Number(r.n) > 0; }).map(function (r) { return [r.id, Number(r.n)]; }), equipment: v.equipment.filter(function (r) { return Number(r.n) > 0; }).map(function (r) { return [r.id, Number(r.n)]; }) };
+    var rate = GL.crewRate(out, lib);
+    var ok = out.name && (out.labor.length || out.equipment.length) && Number(v.hours) > 0 && Number(v.hours) <= 24;
+    function rowsOf(kind, label, empty) {
+      var src = lib[kind];
+      return h('div', { className: 'gl-crewrows' },
+        h('div', { className: 'label-medium gl-dim' }, label),
+        v[kind].map(function (r, i) { var rec = src.find(function (x) { return x.id === r.id; }); var each = kind === 'labor' ? GL.laborRate(rec) : GL.equipRate(rec);
+          return h('div', { key: i, className: 'gl-crewrow' },
+            h(GL.Field, { label: 'How many', value: r.n, inputMode: 'decimal', onChange: function (x) { setRow(kind, i, 'n', x); }, className: 'gl-field gl-field--count' }),
+            h(GL.Select, { label: kind === 'labor' ? 'Classification' : 'Machine', value: r.id, options: src.map(function (x) { return { value: x.id, label: x.name }; }), onChange: function (x) { setRow(kind, i, 'id', x); } }),
+            h('span', { className: 'body-small gl-dim gl-crewrow__rate' }, GL.fmtMoney(each, 2) + '/hr'),
+            h(M.IconButton, { icon: 'close', label: 'Remove ' + (rec ? rec.name : 'row'), size: 'xs', onClick: function () { delRow(kind, i); } })); }),
+        src.length ? h(M.Button, { variant: 'text', size: 'xs', icon: 'add', onClick: function () { addRow(kind); } }, kind === 'labor' ? 'Add people' : 'Add machine') : h('div', { className: 'body-small gl-dim' }, empty));
+    }
+    return h(M.Dialog, { headline: c ? 'Edit crew' : 'Add crew', icon: 'groups', onClose: p.onClose, className: 'gl-dialog--wide', actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'), h(M.Button, { disabled: !ok, onClick: function () { p.onSave(out); } }, c ? 'Save' : 'Add crew')) },
+      h('div', { className: 'gl-dialog__form' },
+        h('div', { className: 'm3-row', style: { gap: 12 } },
+          h(GL.Field, { label: 'Crew name', value: v.name, onChange: function (x) { set('name', x); }, required: true, placeholder: 'Paving crew' }),
+          h(GL.Field, { label: 'Hours per day', value: v.hours, inputMode: 'decimal', onChange: function (x) { set('hours', x); }, className: 'gl-field gl-field--short' })),
+        rowsOf('labor', 'People', 'Add labor classes on the Labor tab first.'),
+        rowsOf('equipment', 'Machines', 'Add machines on the Equipment tab first.'),
+        h('div', { className: 'gl-crewtotal' },
+          h('span', null, 'Labor ', h('b', null, GL.fmtMoney(rate.laborPerDay))), h('span', null, 'Equipment ', h('b', null, GL.fmtMoney(rate.equipPerDay))), h('span', { className: 'title-small' }, 'Crew day ' + GL.fmtMoney(rate.perDay) + ' · ' + rate.people + ' people'))));
+  }
+
+  function LibEditDialog(p) {
+    var kind = p.target, r = p.record;
+    var f = useState({ name: r ? r.name || '' : '', wage: r && r.wage != null ? String(r.wage) : '', burden: r && r.burden != null ? String(r.burden) : '', rate: r && r.rate != null ? String(r.rate) : '', own: r && r.own != null ? String(r.own) : '', op: r && r.op != null ? String(r.op) : '', fuel: r && r.fuel != null ? String(r.fuel) : '', unit: r ? r.unit || '' : '', cost: r && r.cost != null ? String(r.cost) : '', trade: r ? r.trade || '' : '', kind: r ? r.kind || 'sub' : 'sub', contact: r ? r.contact || '' : '', email: r ? r.email || '' : '', phone: r ? r.phone || '' : '' });
+    var v = f[0];
+    function set(k, val) { var o = Object.assign({}, v); o[k] = val; f[1](o); }
+    var num = function (s) { return s === '' ? null : Number(s); };
+    var bad = function (s) { return s !== '' && (isNaN(Number(s)) || Number(s) < 0); };
+    var out = { name: v.name.trim() }, ok = !!out.name, preview = '';
+    if (kind === 'labor') {
+      if (v.wage !== '') { out.wage = num(v.wage); out.burden = num(v.burden) || 0; out.rate = GL.laborRate(out); } else { out.rate = num(v.rate); out.wage = null; out.burden = null; }
+      ok = ok && !bad(v.wage) && !bad(v.burden) && !bad(v.rate) && out.rate > 0; preview = out.rate > 0 ? GL.fmtMoney(out.rate, 2) + ' an hour, ' + GL.fmtMoney(out.rate * 8) + ' for 8 hours' : '';
+    } else if (kind === 'equipment') {
+      var parts = v.own !== '' || v.op !== '' || v.fuel !== '';
+      if (parts) { out.own = num(v.own) || 0; out.op = num(v.op) || 0; out.fuel = num(v.fuel) || 0; out.rate = GL.equipRate(out); } else { out.rate = num(v.rate); out.own = null; out.op = null; out.fuel = null; }
+      ok = ok && !bad(v.own) && !bad(v.op) && !bad(v.fuel) && !bad(v.rate) && out.rate > 0; preview = out.rate > 0 ? GL.fmtMoney(out.rate, 2) + ' an hour, ' + GL.fmtMoney(out.rate * 8) + ' for 8 hours' : '';
+    } else if (kind === 'materials') {
+      out.unit = v.unit.trim().toUpperCase() || 'EA'; out.cost = num(v.cost); ok = ok && !bad(v.cost) && out.cost != null;
+    } else {
+      out.trade = v.trade.trim(); out.kind = v.kind; out.contact = v.contact.trim(); out.email = v.email.trim(); out.phone = v.phone.trim();
+    }
+    var titles = { labor: 'labor class', equipment: 'machine', materials: 'material', vendors: 'company' };
+    return h(M.Dialog, { headline: (r ? 'Edit ' : 'Add ') + titles[kind], onClose: p.onClose, actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'), h(M.Button, { disabled: !ok, onClick: function () { p.onSave(out); } }, r ? 'Save' : 'Add')) },
+      h('div', { className: 'gl-dialog__form' },
+        h(GL.Field, { label: kind === 'labor' ? 'Classification' : kind === 'equipment' ? 'Machine' : kind === 'materials' ? 'Material' : 'Company', value: v.name, onChange: function (x) { set('name', x); }, required: true }),
+        kind === 'labor' ? h(Frag, null,
+          h('div', { className: 'm3-row', style: { gap: 12 } },
+            h(GL.Field, { label: 'Base wage', prefix: '$', suffix: '/ hr', value: v.wage, inputMode: 'decimal', onChange: function (x) { set('wage', x); }, className: 'gl-field gl-field--money' }),
+            h(GL.Field, { label: 'Burden', suffix: '%', value: v.burden, inputMode: 'decimal', onChange: function (x) { set('burden', x); }, supportingText: 'Payroll taxes, insurance, fringe', className: 'gl-field gl-field--pct' })),
+          v.wage === '' ? h(GL.Field, { label: 'Or the burdened rate', prefix: '$', suffix: '/ hr', value: v.rate, inputMode: 'decimal', onChange: function (x) { set('rate', x); }, className: 'gl-field gl-field--money' }) : null) : null,
+        kind === 'equipment' ? h(Frag, null,
+          h('div', { className: 'm3-row', style: { gap: 12 } },
+            h(GL.Field, { label: 'Ownership', prefix: '$', suffix: '/ hr', value: v.own, inputMode: 'decimal', onChange: function (x) { set('own', x); }, className: 'gl-field gl-field--money' }),
+            h(GL.Field, { label: 'Operating', prefix: '$', suffix: '/ hr', value: v.op, inputMode: 'decimal', onChange: function (x) { set('op', x); }, supportingText: 'Repairs, tires, wear', className: 'gl-field gl-field--money' }),
+            h(GL.Field, { label: 'Fuel', prefix: '$', suffix: '/ hr', value: v.fuel, inputMode: 'decimal', onChange: function (x) { set('fuel', x); }, className: 'gl-field gl-field--money' })),
+          v.own === '' && v.op === '' && v.fuel === '' ? h(GL.Field, { label: 'Or the hourly rate', prefix: '$', suffix: '/ hr', value: v.rate, inputMode: 'decimal', onChange: function (x) { set('rate', x); }, className: 'gl-field gl-field--money' }) : null) : null,
+        kind === 'materials' ? h('div', { className: 'm3-row', style: { gap: 12 } },
+          h(GL.Field, { label: 'Unit', value: v.unit, onChange: function (x) { set('unit', x); }, placeholder: 'TON', className: 'gl-field gl-field--short' }),
+          h(GL.Field, { label: 'Cost', prefix: '$', value: v.cost, inputMode: 'decimal', onChange: function (x) { set('cost', x); }, className: 'gl-field gl-field--money' })) : null,
+        kind === 'vendors' ? h(Frag, null,
+          h('div', { className: 'm3-row', style: { gap: 12 } },
+            h(GL.Field, { label: 'Trade', value: v.trade, onChange: function (x) { set('trade', x); }, placeholder: 'Striping' }),
+            h(GL.Select, { label: 'Type', value: v.kind, options: [{ value: 'sub', label: 'Subcontractor' }, { value: 'supplier', label: 'Supplier' }], onChange: function (x) { set('kind', x); } })),
+          h('div', { className: 'm3-row', style: { gap: 12 } },
+            h(GL.Field, { label: 'Contact', value: v.contact, onChange: function (x) { set('contact', x); } }),
+            h(GL.Field, { label: 'Phone', value: v.phone, onChange: function (x) { set('phone', x); }, inputMode: 'tel' })),
+          h(GL.Field, { label: 'Email', value: v.email, onChange: function (x) { set('email', x); }, inputMode: 'email' })) : null,
+        preview ? h('div', { className: 'title-small' }, preview) : null));
   }
 
   function ExportDialog(p) {
-    var sys = useState(p.ui.exportSystem || 'qbo');
+    var sys = useState(p.ui.exportSystem || p.defaultSystem || 'qbo');
     var systems = { qbo: 'QuickBooks Online (CSV)', qbd: 'QuickBooks Desktop (IIF)', spectrum: 'Viewpoint Spectrum (CSV)', vista: 'Viewpoint Vista (CSV)', sage: 'Sage 300 CRE (CSV)' };
     var busy = useState(false);
     return h(M.Dialog, { headline: 'Export budget', icon: 'account_balance', onClose: p.onClose, actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'), h(M.Button, { icon: 'download', disabled: busy[0] || !p.canDownload, onClick: function () { busy[1](true); p.onExport(sys[0]).then(function () { busy[1](false); }); } }, 'Download CSV')) },
@@ -345,7 +615,7 @@ import * as R from 'react';
   function SubmitDialog(p) {
     return h(M.Dialog, { headline: 'Mark this bid as submitted?', icon: 'send', onClose: p.onClose, actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Not yet'), h(M.Button, { icon: 'check', onClick: p.onSubmit }, 'Mark submitted')) },
       h('div', { className: 'gl-dialog__form' },
-        h('div', { className: 'body-medium' }, 'Total ' + GL.fmtMoney(p.total, 2) + ' at ' + p.margin.toFixed(1) + '% margin. Every unit price is frozen as submitted and the bid moves to Submitted on the Bids list. You can undo this like anything else.')));
+        h('div', { className: 'body-medium' }, 'Total ' + GL.fmtMoney(p.total, 2) + ' at ' + p.margin.toFixed(1) + '% margin. The bid moves to Submitted on the Bids list. ' + (p.cloud ? 'You can reopen it from Bid day.' : 'You can undo this like anything else.'))));
   }
 
   /* ---------- App shell ---------- */
@@ -353,6 +623,12 @@ import * as R from 'react';
   function App(p) {
     var store = p.store, session = p.session || {};
     var doc = store.doc, ui = store.ui, api = store.api;
+    var cloud = store.mode === 'cloud', viewer = session.role === 'viewer';
+    var company = session.orgName || 'Cascade Civil Constructors, Inc. (sample)';
+    if (viewer) {
+      var ro = function () { toast('You can view this company but not change it. Ask an owner to make you an estimator.'); return Promise.resolve(); };
+      api = Object.assign({}, api, { update: ro, undo: ro, redo: ro, jump: ro });
+    }
     var width = GL.useWidth();
     var d = useMemo(function () { return GL.derive(doc, ui.bidId || doc.currentBidId); }, [doc, ui.bidId]);
     var dialog = useState(null);
@@ -370,7 +646,8 @@ import * as R from 'react';
         var typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
         if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z') { if (typing) return; e.preventDefault(); if (e.shiftKey) api.redo(); else api.undo(); return; }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { if (typing) return; e.preventDefault(); api.redo(); return; }
-        if (typing || dialog[0]) return;
+        if (typing || dialog[0] || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+        if (e.target.closest && e.target.closest('.m3-grid, [role="menu"], [role="dialog"]') && /^[1-5lL]$/.test(e.key)) return;
         if (e.key === '?') { e.preventDefault(); dialog[1]({ kind: 'shortcuts' }); }
         else if (e.key.toLowerCase() === 'l' && ui.selectedItemId && ui.screen === 'estimate') { toggleLock(ui.selectedItemId); }
         else if (/^[1-5]$/.test(e.key) && ui.screen === 'estimate') { api.ui({ tab: ['sheet', 'quotes', 'bidday', 'checks', 'form'][Number(e.key) - 1] }); }
@@ -407,22 +684,23 @@ import * as R from 'react';
       api.ui({ bidId: id, screen: 'estimate', tab: 'sheet', selectedItemId: null });
       if (doc.estimates[id] && doc.currentBidId !== id) api.update(function (doc) { doc.currentBidId = id; }, { title: 'Opened ' + doc.bids.find(function (b) { return b.id === id; }).name, icon: 'folder_open' });
     }
-    function startEstimate(bidId, how) {
+    function startEstimate(bidId, how, srcId) {
+      var srcBid = srcId ? doc.bids.find(function (b) { return b.id === srcId; }) : null;
       api.update(function (doc) {
         var e = GL.blankEstimate();
-        if (how === 'copy') { var src = doc.estimates.B1; if (src) { e.items = JSON.parse(JSON.stringify(src.items)); e.tasks = JSON.parse(JSON.stringify(src.tasks)).map(function (t) { if (t.type === 'sub') { t.packageId = null; } return t; }); } }
+        if (how === 'copy') { var src = doc.estimates[srcId]; if (src) { e.items = JSON.parse(JSON.stringify(src.items)); e.tasks = JSON.parse(JSON.stringify(src.tasks)).map(function (t) { if (t.type === 'sub') { t.packageId = null; } return t; }); e.markup = Object.assign({}, src.markup); e.targetMargin = src.targetMargin; } }
         doc.estimates[bidId] = e; doc.currentBidId = bidId;
         var b = doc.bids.find(function (x) { return x.id === bidId; }); if (b.status === 'draft') b.status = 'in-progress';
-      }, { title: 'Started estimate for ' + doc.bids.find(function (b) { return b.id === bidId; }).name.split(',')[0], detail: how === 'copy' ? 'copied items and crews from SR-7' : how === 'blank' ? 'blank sheet' : 'from pasted item list', icon: 'post_add' });
+      }, { title: 'Started estimate for ' + doc.bids.find(function (b) { return b.id === bidId; }).name.split(',')[0], detail: how === 'copy' ? 'copied items and tasks from ' + (srcBid ? srcBid.name.split(',')[0] : 'a past bid') : how === 'blank' ? 'blank sheet' : 'from pasted item list', icon: 'post_add' });
       api.ui({ bidId: bidId, tab: 'sheet' });
       if (how === 'import') dialog[1]({ kind: 'import', target: 'items' });
     }
     function downloadForm() {
-      var rows = d.items.map(function (it) { return '<tr><td>' + it.code + '</td><td>' + esc(it.name) + '</td><td class="n">' + GL.fmtNum(it.qty) + '</td><td>' + it.unit + '</td><td class="n">' + GL.fmtMoney(it.unitPrice, 2) + '</td><td class="n">' + GL.fmtMoney(it.ext, 2) + '</td></tr>'; }).join('');
-      var html = '<!doctype html><html><head><meta charset="utf-8"><title>Bid form - ' + esc(d.bid.name) + '</title><style>body{font:14px/1.4 Roboto,Arial,sans-serif;margin:40px;color:#111}h1{font-size:20px;margin:0 0 4px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left}.n{text-align:right;font-variant-numeric:tabular-nums}tfoot td{font-weight:bold;border-top:2px solid #111}.sig{display:flex;gap:40px;margin-top:48px}.sig div{flex:1;border-top:1px solid #111;padding-top:6px;font-size:12px}</style></head><body><div style="font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:#555">Schedule of bid items</div><h1>' + esc(d.bid.name) + '</h1><div>Owner: ' + esc(d.bid.owner) + ' &middot; Bids due ' + GL.fmtDate(d.bid.due) + ' at ' + d.bid.dueTime + '</div><div>Bidder: Cascade Civil Constructors, Inc. (sample) &middot; Estimator: ' + esc(d.bid.estimator) + '</div><table><thead><tr><th>Item</th><th>Description</th><th class="n">Quantity</th><th>Unit</th><th class="n">Unit price</th><th class="n">Amount</th></tr></thead><tbody>' + rows + '</tbody><tfoot><tr><td colspan="5">Total bid</td><td class="n">' + GL.fmtMoney(d.totals.bidTotal, 2) + '</td></tr></tfoot></table><div class="sig"><div>Authorized signature</div><div>Title</div><div>Date</div></div></body></html>';
+      var rows = d.items.map(function (it) { return '<tr><td>' + esc(it.code) + '</td><td>' + esc(it.name) + '</td><td class="n">' + GL.fmtNum(it.qty) + '</td><td>' + esc(it.unit) + '</td><td class="n">' + GL.fmtMoney(it.unitPrice, 2) + '</td><td class="n">' + GL.fmtMoney(it.ext, 2) + '</td></tr>'; }).join('');
+      var html = '<!doctype html><html><head><meta charset="utf-8"><title>Bid form - ' + esc(d.bid.name) + '</title><style>body{font:14px/1.4 Roboto,Arial,sans-serif;margin:40px;color:#111}h1{font-size:20px;margin:0 0 4px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left}.n{text-align:right;font-variant-numeric:tabular-nums}tfoot td{font-weight:bold;border-top:2px solid #111}.sig{display:flex;gap:40px;margin-top:48px}.sig div{flex:1;border-top:1px solid #111;padding-top:6px;font-size:12px}</style></head><body><div style="font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:#555">Schedule of bid items</div><h1>' + esc(d.bid.name) + '</h1><div>Owner: ' + esc(d.bid.owner) + ' &middot; Bids due ' + GL.fmtDate(d.bid.due) + ' at ' + esc(d.bid.dueTime) + '</div><div>Bidder: ' + esc(company) + ' &middot; Estimator: ' + esc(d.bid.estimator || '') + '</div><table><thead><tr><th>Item</th><th>Description</th><th class="n">Quantity</th><th>Unit</th><th class="n">Unit price</th><th class="n">Amount</th></tr></thead><tbody>' + rows + '</tbody><tfoot><tr><td colspan="5">Total bid</td><td class="n">' + GL.fmtMoney(d.totals.bidTotal, 2) + '</td></tr></tfoot></table><div class="sig"><div>Authorized signature</div><div>Title</div><div>Date</div></div></body></html>';
       return saveFile('Bid form - ' + d.bid.name.replace(/[^\w ,.-]+/g, '') + '.html', html);
     }
-    function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function saveFile(name, data) {
       try {
         var blob = data instanceof Blob ? data : new Blob([data], { type: /\.csv$/i.test(name) ? 'text/csv' : /\.iif$/i.test(name) ? 'text/plain' : 'text/html' });
@@ -442,8 +720,9 @@ import * as R from 'react';
         var docnum = (d.bid.id || 'GL').toString().slice(-8).toUpperCase();
         var t = function (s) { return String(s == null ? '' : s).replace(/[\t\r\n]/g, ' '); };
         var lines = ['!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tMEMO', '!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tMEMO\tQNTY\tPRICE\tINVITEM', '!ENDTRNS'];
-        lines.push(['TRNS', '', 'ESTIMATE', date, 'Accounts Receivable', t(job), r2(d.totals.bidTotal), docnum, t('Gradeline estimate ' + job)].join('\t'));
-        d.items.forEach(function (it) { lines.push(['SPL', '', 'ESTIMATE', date, 'Construction Income', t(job), -r2(it.ext), docnum, t(it.name), -it.qty, r2(it.unitPrice), t(it.code || it.name)].join('\t')); });
+        var cust = t(d.bid.owner || job);
+        lines.push(['TRNS', '', 'ESTIMATE', date, 'Estimates', cust, r2(d.totals.bidTotal), docnum, t(job)].join('\t'));
+        d.items.forEach(function (it) { lines.push(['SPL', '', 'ESTIMATE', date, 'Construction Income', cust, -r2(it.ext), docnum, t(it.name), -it.qty, r2(it.unitPrice), t(it.code || it.name)].join('\t')); });
         lines.push('ENDTRNS');
         return saveFile('Estimate - ' + safe + '.iif', lines.join('\r\n') + '\r\n').then(function () { dialog[1](null); });
       }
@@ -451,15 +730,21 @@ import * as R from 'react';
         // QuickBooks Online: a line-per-item CSV in the shape QBO's import and most add-ons accept (Customer, Product/Service, Description, Qty, Rate, Amount), plus the cost split for job costing.
         var hdrQ = ['Customer', 'Product/Service', 'Description', 'Qty', 'Unit', 'Rate', 'Amount', 'Labor cost', 'Equipment cost', 'Material cost', 'Subcontract cost', 'Other cost', 'Total cost'];
         var rowsQ = [hdrQ].concat(d.items.map(function (it) { return [job, it.code || it.name, it.name, it.qty, it.unit, r2(it.unitPrice), r2(it.ext), r2(it.labor), r2(it.equipment), r2(it.material), r2(it.sub), r2(it.other), r2(it.direct)]; }));
-        rowsQ.push([job, '', 'Total', '', '', '', r2(d.totals.bidTotal), r2(d.totals.labor), r2(d.totals.equipment), r2(d.totals.material), r2(d.totals.sub), r2(d.totals.other), r2(d.totals.direct)]);
         return saveFile('Estimate - ' + safe + ' - QuickBooks Online.csv', GL.toCSV(rowsQ)).then(function () { dialog[1](null); });
       }
       var hdr = sys === 'sage' ? ['Job', 'Phase', 'Description', 'Qty', 'UM', 'L (1)', 'E (2)', 'M (3)', 'S (4)', 'O (5)', 'Total'] : ['Job', 'Phase', 'Description', 'Qty', 'UM', 'Labor', 'Equipment', 'Material', 'Subcontract', 'Other', 'Budget'];
       var rows = [hdr].concat(d.items.map(function (it) { return [job, it.code, it.name, it.qty, it.unit, r2(it.labor), r2(it.equipment), r2(it.material), r2(it.sub), r2(it.other), r2(it.direct)]; }));
-      rows.push(['', '', 'Total', '', '', r2(d.totals.labor), r2(d.totals.equipment), r2(d.totals.material), r2(d.totals.sub), r2(d.totals.other), r2(d.totals.direct)]);
       return saveFile('Budget - ' + safe + ' - ' + sys + '.csv', GL.toCSV(rows)).then(function () { dialog[1](null); });
     }
     function r2(v) { return Math.round(v * 100) / 100; }
+    function libRecord(target, r) {
+      var rec = { id: GL.uid({ labor: 'L', equipment: 'E', materials: 'M', vendors: 'V' }[target] || 'X'), name: r.name };
+      if (target === 'materials') { rec.unit = (r.unit || 'EA').toUpperCase(); rec.cost = r.rate; }
+      else if (target === 'labor') { if (r.wage != null) { rec.wage = r.wage; rec.burden = r.burden || 0; } rec.rate = r.wage != null ? GL.laborRate(rec) : r.rate; }
+      else if (target === 'equipment') { if (r.own != null || r.op != null || r.fuel != null) { rec.own = r.own || 0; rec.op = r.op || 0; rec.fuel = r.fuel || 0; } rec.rate = rec.own != null ? GL.equipRate(rec) : r.rate; }
+      else if (target === 'vendors') { rec.trade = r.trade || ''; rec.kind = 'sub'; rec.contact = r.contact || ''; rec.email = r.email || ''; rec.phone = r.phone || ''; }
+      return rec;
+    }
 
     /* ----- dialogs ----- */
     var dlg = dialog[0], dlgNode = null;
@@ -490,23 +775,45 @@ import * as R from 'react';
           api.ui(function (u) { var ex = Object.assign({}, u.expanded); ex[dlg.itemId] = true; return { expanded: ex }; });
           close();
         } }); }
-      else if (dlg.kind === 'import') dlgNode = h(ImportDialog, { target: dlg.target || 'items', onClose: close, onImport: function (rows, target) {
+      else if (dlg.kind === 'import') dlgNode = h(ImportDialog, { target: dlg.target || 'items', items: d.est.items, onClose: close, onImport: function (rows, target) {
         if (target === 'items') { api.update(function (doc) { var e = curEst(doc); rows.forEach(function (r) { e.items.push({ id: GL.uid('I'), code: r.code, name: r.name, unit: r.unit, qty: r.qty }); }); }, { title: 'Pasted ' + rows.length + ' pay items', detail: 'from the clipboard', icon: 'content_paste' }); toast('Added ' + rows.length + ' pay items. Each needs at least one task.'); }
-        else { api.update(function (doc) { rows.forEach(function (r) { var rec = { id: GL.uid(target[0].toUpperCase()), name: r.name }; if (target === 'materials') { rec.unit = r.unit || 'EA'; rec.cost = r.rate; } else rec.rate = r.rate; doc.library[target].push(rec); }); }, { title: 'Pasted ' + rows.length + ' ' + target + ' rates', icon: 'content_paste' }); toast('Added ' + rows.length + ' to the library.'); }
+        else { api.update(function (doc) { rows.forEach(function (r) { doc.library[target].push(libRecord(target, r)); }); }, { title: 'Pasted ' + rows.length + ' ' + (target === 'vendors' ? 'companies' : target + ' rates'), icon: 'content_paste' }); toast('Added ' + rows.length + ' to the library.'); }
         close();
       } });
-      else if (dlg.kind === 'libadd') { var tgt = dlg.target;
-        if (tgt === 'crews' || tgt === 'vendors') dlgNode = h(M.Dialog, { headline: tgt === 'crews' ? 'Add crew' : 'Add vendor', onClose: close, actions: h(M.Button, { variant: 'text', onClick: close }, 'Close') }, h('div', { className: 'body-medium' }, 'In the full product this opens the crew builder (pick people and machines, see the day rate update live) or a vendor card. The prototype keeps the sample ' + tgt + '.'));
-        else dlgNode = h(ImportDialog, { target: tgt, onClose: close, onImport: function (rows, target) { api.update(function (doc) { rows.forEach(function (r) { var rec = { id: GL.uid('X'), name: r.name }; if (target === 'materials') { rec.unit = r.unit || 'EA'; rec.cost = r.rate; } else rec.rate = r.rate; doc.library[target].push(rec); }); }, { title: 'Added ' + rows.length + ' to ' + target, icon: 'add' }); close(); } }); }
-      else if (dlg.kind === 'rfq') dlgNode = h(RFQDialog, { doc: doc, onClose: close, onSend: function (v) {
+      else if (dlg.kind === 'libedit') { var tgt = dlg.target, rec0 = dlg.id ? doc.library[tgt].find(function (x) { return x.id === dlg.id; }) : null;
+        var saveRec = function (v) {
+          var word = { crews: 'crew', labor: 'labor class', equipment: 'machine', materials: 'material', vendors: 'company' }[tgt];
+          if (rec0) api.update(function (dd) { var x = dd.library[tgt].find(function (y) { return y.id === rec0.id; }); Object.keys(v).forEach(function (k) { if (v[k] == null) delete x[k]; else x[k] = v[k]; }); }, { title: 'Edited ' + word + ' ' + v.name, icon: 'edit' });
+          else api.update(function (dd) { var x = { id: GL.uid({ crews: 'C', labor: 'L', equipment: 'E', materials: 'M', vendors: 'V' }[tgt]) }; Object.keys(v).forEach(function (k) { if (v[k] != null) x[k] = v[k]; }); dd.library[tgt].push(x); }, { title: 'Added ' + word + ' ' + v.name, icon: 'add' });
+          toast((rec0 ? 'Saved ' : 'Added ') + v.name + '.'); close();
+        };
+        dlgNode = tgt === 'crews' ? h(CrewDialog, { doc: doc, crew: rec0, onClose: close, onSave: saveRec }) : h(LibEditDialog, { target: tgt, record: rec0, onClose: close, onSave: saveRec }); }
+      else if (dlg.kind === 'copybid') dlgNode = h(CopyBidDialog, { doc: doc, bidId: dlg.bidId, onClose: close, onCopy: function (src) { close(); startEstimate(dlg.bidId, 'copy', src); } });
+      else if (dlg.kind === 'package') dlgNode = h(PackageDialog, { doc: doc, onClose: close, onSave: function (v) {
         var pid = GL.uid('P');
-        api.update(function (doc) { var e = curEst(doc); e.packages.push({ id: pid, name: v.name, lines: v.itemIds.map(function (id) { return { itemId: id }; }), sentAt: new Date().toISOString().slice(0, 10), quotes: v.vendorIds.map(function (vid) { return { id: GL.uid('Q'), vendorId: vid, status: 'pending' }; }), selectedQuoteId: null });
-          v.itemIds.forEach(function (iid) { if (!e.tasks.some(function (t) { return t.itemId === iid && t.type === 'sub'; })) e.tasks.push({ id: GL.uid('T'), itemId: iid, name: v.name + ' (sub)', type: 'sub', packageId: pid, plug: null }); else e.tasks.forEach(function (t) { if (t.itemId === iid && t.type === 'sub' && !t.packageId) t.packageId = pid; }); }); },
-          { title: 'Sent RFQ ' + v.name + ' to ' + v.vendorIds.length + ' vendor' + (v.vendorIds.length === 1 ? '' : 's'), detail: v.itemIds.length + ' pay item' + (v.itemIds.length === 1 ? '' : 's'), icon: 'send' });
-        toast('RFQ sent. Portal links went out to ' + v.vendorIds.length + ' vendor' + (v.vendorIds.length === 1 ? '' : 's') + '.'); close();
+        api.update(function (doc) { var e = curEst(doc); e.packages.push({ id: pid, name: v.name.trim(), lines: v.itemIds.map(function (id) { return { itemId: id }; }), sentAt: new Date().toISOString().slice(0, 10), quotes: v.vendorIds.map(function (vid) { return { id: GL.uid('Q'), vendorId: vid, status: 'pending' }; }), selectedQuoteId: null });
+          v.itemIds.forEach(function (iid) { if (!e.tasks.some(function (t) { return t.itemId === iid && t.type === 'sub'; })) e.tasks.push({ id: GL.uid('T'), itemId: iid, name: v.name.trim() + ' (sub)', type: 'sub', packageId: pid, plug: null }); else e.tasks.forEach(function (t) { if (t.itemId === iid && t.type === 'sub' && !t.packageId) t.packageId = pid; }); }); },
+          { title: 'Added quote package ' + v.name.trim(), detail: v.itemIds.length + ' pay item' + (v.itemIds.length === 1 ? '' : 's') + (v.vendorIds.length ? ', expecting ' + v.vendorIds.length + ' quote' + (v.vendorIds.length === 1 ? '' : 's') : ''), icon: 'request_quote' });
+        toast('Added ' + v.name.trim() + '. Set a plug on each item until quotes come in.'); close();
       } });
-      else if (dlg.kind === 'export') dlgNode = h(ExportDialog, { ui: ui, api: api, canDownload: canDl[0], onClose: close, onExport: exportBudget });
-      else if (dlg.kind === 'submit') dlgNode = h(SubmitDialog, { total: d.totals.bidTotal, margin: d.totals.margin, onClose: close, onSubmit: function () { setBidStatus('submitted'); close(); toast('Marked as submitted. Good luck at the opening.', 'Undo', api.undo); } });
+      else if (dlg.kind === 'quote') { var qpkg = d.packages.find(function (x) { return x.id === dlg.packageId; }); var qq = qpkg && dlg.quoteId ? qpkg.quotes.find(function (x) { return x.id === dlg.quoteId; }) : null;
+        if (qpkg) dlgNode = h(QuoteDialog, { doc: doc, pkg: qpkg, quote: qq, onClose: close,
+          onDelete: function () { api.update(function (doc) { var pk = curEst(doc).packages.find(function (x) { return x.id === qpkg.id; }); pk.quotes = pk.quotes.filter(function (x) { return x.id !== qq.id; }); if (pk.selectedQuoteId === qq.id) pk.selectedQuoteId = null; }, { title: 'Removed quote from ' + (qq.vendor ? qq.vendor.name : 'a vendor'), detail: qpkg.name, icon: 'delete' }); toast('Removed the quote.', 'Undo', api.undo); close(); },
+          onSave: function (v) {
+            var vid = v.vendorId, vname = v.newVendor ? v.newVendor.name : (doc.library.vendors.find(function (x) { return x.id === vid; }) || {}).name;
+            if (v.newVendor) { var known = doc.library.vendors.find(function (x) { return x.name.toLowerCase() === v.newVendor.name.toLowerCase(); }); vid = known ? known.id : GL.uid('V'); }
+            api.update(function (doc) {
+              if (v.newVendor && !doc.library.vendors.some(function (x) { return x.id === vid; })) doc.library.vendors.push({ id: vid, name: v.newVendor.name, trade: v.newVendor.trade || qpkg.name, kind: 'sub', contact: '', email: '' });
+              var pk = curEst(doc).packages.find(function (x) { return x.id === qpkg.id; });
+              var rec = { vendorId: vid, status: 'received', unitPrices: v.unitPrices, lump: v.lump, note: v.note, receivedAt: new Date().toISOString().slice(0, 10) };
+              var ex = qq ? pk.quotes.find(function (x) { return x.id === qq.id; }) : pk.quotes.find(function (x) { return x.vendorId === vid && x.status === 'pending'; });
+              if (ex) { Object.keys(rec).forEach(function (k) { if (rec[k] == null) delete ex[k]; else ex[k] = rec[k]; }); }
+              else { var nq = { id: GL.uid('Q') }; Object.keys(rec).forEach(function (k) { if (rec[k] != null) nq[k] = rec[k]; }); pk.quotes.push(nq); }
+            }, { title: (qq ? 'Updated' : 'Entered') + ' quote from ' + vname, detail: qpkg.name, icon: 'request_quote' });
+            toast('Saved the quote from ' + vname + '. Pick it under the package to use it.'); close();
+          } }); }
+      else if (dlg.kind === 'export') dlgNode = h(ExportDialog, { ui: ui, api: api, defaultSystem: doc.setup && typeof doc.setup.accounting === 'string' ? doc.setup.accounting : null, canDownload: canDl[0], onClose: close, onExport: exportBudget });
+      else if (dlg.kind === 'submit') dlgNode = h(SubmitDialog, { total: d.totals.bidTotal, margin: d.totals.margin, onClose: close, onSubmit: function () { setBidStatus('submitted'); close(); if (cloud) toast('Marked as submitted. Reopen it from Bid day if anything changes.'); else toast('Marked as submitted.', 'Undo', api.undo); }, cloud: cloud });
     }
 
     /* ----- shell ----- */
@@ -514,7 +821,7 @@ import * as R from 'react';
     var navItems = [{ icon: 'folder_open', label: 'Bids', value: 'bids' }, { icon: 'table_rows', label: 'Estimate', value: 'estimate' }, { icon: 'library_books', label: 'Library', value: 'library' }, { icon: 'insights', label: 'Insights', value: 'insights' }];
     var compact = width < 840;
     var titles = { bids: 'Bids', estimate: 'Estimate', library: 'Cost library', insights: 'Insights' };
-    var common = { doc: doc, ui: ui, api: api, d: d, width: width, peers: session.peers, openDialog: function (x) { dialog[1](x); }, toast: toast, toggleLock: toggleLock, deleteItem: deleteItem, deleteTask: deleteTask, canUndo: store.canUndo, canRedo: store.canRedo, setBidStatus: setBidStatus, openBid: openBid, startEstimate: startEstimate, downloadForm: downloadForm, stack: store.stack, index: store.index };
+    var common = { doc: doc, ui: ui, api: api, d: d, width: width, peers: session.peers, demo: !cloud, company: company, openDialog: function (x) { dialog[1](x); }, toast: toast, toggleLock: toggleLock, deleteItem: deleteItem, deleteTask: deleteTask, canUndo: store.canUndo, canRedo: store.canRedo, setBidStatus: setBidStatus, openBid: openBid, startEstimate: startEstimate, downloadForm: downloadForm, stack: store.stack, index: store.index };
     var content = screen === 'bids' ? h(BidsScreen, common) : screen === 'estimate' ? h(EstimateScreen, common) : screen === 'library' ? h(LibraryScreen, common) : h(InsightsScreen, common);
     var themeIcon = { system: 'contrast', light: 'light_mode', dark: 'dark_mode', sunlight: 'wb_sunny' }[ui.theme || 'system'];
     return h('div', { className: 'gl-app' + (compact ? ' is-compact' : ''), 'data-theme': ui.theme && ui.theme !== 'system' ? ui.theme : undefined, 'data-money': ui.fieldMode ? 'hidden' : undefined },

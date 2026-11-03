@@ -32,8 +32,8 @@ npm run build && npm test   # production build + headless browser checks
 ### 1. Supabase (database and sign-in)
 
 1. Go to supabase.com, create a project called `gradeline` (pick the region closest to you; save the database password somewhere).
-2. Open **SQL Editor**, paste the whole of `supabase/migrations/0001_init.sql`, run it. It creates every table, the security rules and the functions.
-3. **Authentication › Providers › Email**: leave it on. Turn **off** "Confirm email" is not needed; the app uses sign-in links (magic links), which Supabase sends for you.
+2. Open **SQL Editor** and run each file in `supabase/migrations/` in order (`0001_init.sql`, then `0002_tighten.sql`). Together they create every table, the security rules and the functions.
+3. **Authentication › Providers › Email**: leave it on, and leave **Confirm email** on. The app signs people in with emailed links (magic links), which Supabase sends for you; invites only work for confirmed email addresses.
 4. **Authentication › Providers › Google**: turn it on. It needs a Google OAuth client:
    - In Google Cloud Console, create a project, go to **APIs & Services › Credentials › Create credentials › OAuth client ID**, type **Web application**.
    - Authorized redirect URI: the **Callback URL** Supabase shows on the Google provider page (it looks like `https://xxxx.supabase.co/auth/v1/callback`).
@@ -59,7 +59,7 @@ Open the site, **Sign in**, create your company (choose *Starter rates*, *Sample
 
 ## How saving works
 
-Each company's cost library is one document; each bid has one estimate document. Saves are version-checked on the server (`save_scope`): if someone else saved first, the app refetches and applies your change on top. Every save writes a history row with a snapshot, which is what undo, redo and "jump back" use, for everyone, and it survives reloads. Live updates come over Supabase Realtime; presence shows who else has the estimate open.
+Each company's cost library is one document; each bid has one estimate document. Saves go through one server function (`save_scope`) that checks the version: if someone else saved first, the app refetches and applies your change on top. Estimates, the library and history can't be written any other way, and the server records who made each change. Every save writes a history row with a snapshot, which is what undo, redo and "jump back" use, for everyone, and it survives reloads. Undo only steps back over your own latest change; to go back past someone else's, use History. Live updates come over Supabase Realtime; presence shows who else has the estimate open.
 
 ## Exports
 

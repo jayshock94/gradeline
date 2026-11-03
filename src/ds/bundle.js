@@ -837,8 +837,16 @@
           else if (e.key === 'Escape') { st[1](null); }
         } });
     }
-    return h('button', { type: 'button', className: cx('m3-grid__editbtn', numeric && 'is-numeric'), onClick: start, 'aria-label': 'Edit ' + col.header,
-      onKeyDown: function (e) { if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); start(); } else if (/^[0-9.\-$]$/.test(e.key) && numeric) { e.preventDefault(); start(e.key === '$' ? '' : e.key); } } },
+    var raw = row[col.key];
+    var said = raw == null || raw === '' ? 'empty' : numeric ? (col.type === 'money' ? '$' : '') + fmtNumber(raw, col.decimals == null ? (col.type === 'money' ? 0 : 1) : col.decimals) + (col.type === 'percent' ? '%' : '') : String(raw);
+    var rowName = row.label || row.name || '';
+    return h('button', { type: 'button', className: cx('m3-grid__editbtn', numeric && 'is-numeric'), onClick: start, 'aria-label': col.header + ', ' + said + (rowName ? ', ' + rowName : '') + '. Press Enter to edit',
+      onKeyDown: function (e) {
+        var arrows = { ArrowDown: 'down', ArrowUp: 'up', ArrowRight: 'next', ArrowLeft: 'prev' };
+        if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); e.stopPropagation(); start(); }
+        else if (arrows[e.key] && !e.altKey && !e.ctrlKey && !e.metaKey && p.onMove) { e.preventDefault(); e.stopPropagation(); p.onMove(arrows[e.key]); }
+        else if (/^[0-9.\-$]$/.test(e.key) && numeric && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); start(e.key === '$' ? '' : e.key); }
+      } },
       h('span', { className: 'm3-grid__editval' }, cellText(row, col)),
       h(Icon, { name: 'edit', size: 14, className: 'm3-grid__editicon' }));
   }
@@ -847,7 +855,7 @@
     var density = p.density || 'dense';
     var tableRef = useRef(null);
     function isEditable(col, row) {
-      if (row.kind === 'group' || row.kind === 'total' || row.locked) return false;
+      if (row.kind === 'group' || row.kind === 'total') return false; // locked rows stay editable; the column decides
       return typeof col.editable === 'function' ? col.editable(row) : !!col.editable;
     }
     function move(dir, r, c) {
@@ -858,6 +866,7 @@
       var target = null;
       if (dir === 'next') target = btns[i + 1]; else if (dir === 'prev') target = btns[i - 1];
       else if (dir === 'down') { for (var k = r + 1; k < rows.length; k++) { var el = tbl.querySelector('[data-r="' + k + '"][data-c="' + c + '"] .m3-grid__editbtn'); if (el) { target = el; break; } } }
+      else if (dir === 'up') { for (var k2 = r - 1; k2 >= 0; k2--) { var el2 = tbl.querySelector('[data-r="' + k2 + '"][data-c="' + c + '"] .m3-grid__editbtn'); if (el2) { target = el2; break; } } }
       if (target) target.focus();
     }
     var hasTree = rows.some(function (r) { return r.hasChildren || r.depth; });
@@ -873,6 +882,8 @@
         h('tbody', null, rows.length ? rows.map(function (r, ri) {
           var rowCls = cx('m3-grid__tr', r.kind && 'is-' + r.kind, r.selected && 'is-selected', r.locked && 'is-locked', r.muted && 'is-muted', r.status && 'has-' + r.status, p.onSelect && 'is-clickable');
           return h('tr', { key: r.id != null ? r.id : ri, className: rowCls, 'aria-selected': r.selected ? true : undefined, 'data-depth': r.depth || 0,
+            tabIndex: p.onSelect ? 0 : undefined,
+            onKeyDown: p.onSelect ? function (e) { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onSelect(r); } } : undefined,
             onClick: p.onSelect ? function (e) { if (e.target.closest('button,input,a')) return; p.onSelect(r); } : undefined },
             cols.map(function (c, ci) {
               var editable = isEditable(c, r);

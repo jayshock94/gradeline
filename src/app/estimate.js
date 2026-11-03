@@ -87,13 +87,16 @@ import * as R from 'react';
     }
 
     function onEdit(row, col, value) {
-      var est = d.est;
+      if (col.key === 'unitPrice' && row.rowType === 'item' && (value == null || value === '')) { var cur = d.items.find(function (i) { return i.id === row.itemId; }); if (cur && cur.locked) p.toggleLock(row.itemId); return; }
+      if (value == null || value === '' || isNaN(value)) return;
+      if (value < 0) { p.toast('Numbers here cannot be negative.'); return; }
       if (row.rowType === 'item' && col.key === 'qty') {
         var it = d.items.find(function (i) { return i.id === row.itemId; });
         api.update(function (doc) { var e = doc.estimates[doc.currentBidId]; var x = e.items.find(function (i) { return i.id === row.itemId; }); x.qty = value; },
           { title: 'Changed quantity on ' + it.code, detail: GL.fmtNum(it.qty) + ' → ' + GL.fmtNum(value) + ' ' + it.unit, icon: 'numbers' });
       } else if (row.rowType === 'item' && col.key === 'unitPrice') {
         var it2 = d.items.find(function (i) { return i.id === row.itemId; });
+        value = Math.round(value * 100) / 100;
         api.update(function (doc) { doc.estimates[doc.currentBidId].locks[row.itemId] = value; },
           { title: 'Locked price on ' + it2.code, detail: GL.fmtMoney(it2.unitPrice, 2) + ' → ' + GL.fmtMoney(value, 2) + ' / ' + it2.unit, icon: 'lock' });
         p.toast('Price locked at ' + GL.fmtMoney(value, 2) + ' / ' + it2.unit + '. It stays put when costs change.', 'Undo', api.undo);
@@ -123,7 +126,7 @@ import * as R from 'react';
         onToggle: function (r) { api.ui(function (u) { var ex = Object.assign({}, u.expanded); ex[r.itemId] = !r.expanded; return { expanded: ex }; }); },
         onSelect: function (r) { api.ui({ selectedItemId: r.itemId, paneTab: 'summary' }); },
         onEdit: onEdit }),
-      h('div', { className: 'gl-sheet__foot body-small' }, 'Click a number to edit it. Enter moves down, Tab moves across, Esc cancels. Typing a unit price locks it.'));
+      h('div', { className: 'gl-sheet__foot body-small' }, 'Underlined numbers can be edited: click one or start typing. Arrow keys move, Enter saves and moves down, Esc cancels. Typing a unit price locks it; clear it to unlock.'));
   }
 
   /* ---------- Quotes tab ---------- */
@@ -134,20 +137,16 @@ import * as R from 'react';
       api.update(function (doc) { var e = doc.estimates[doc.currentBidId]; var pk = e.packages.find(function (x) { return x.id === pkg.id; }); pk.selectedQuoteId = quoteId; },
         { title: quoteId === 'self' ? 'Chose self-perform for ' + pkg.name : quoteId ? 'Accepted ' + (q.vendor ? q.vendor.name : 'a quote') + ' for ' + pkg.name : 'Cleared the pick for ' + pkg.name, detail: quoteId === 'self' ? GL.fmtMoney(pkg.selfTotal) : q && q.total != null ? GL.fmtMoney(q.total) : 'back to plug', icon: 'request_quote' });
     }
-    function remind(q) { p.toast('Reminder sent to ' + q.vendor.contact + ' at ' + q.vendor.name + '.'); }
-    function portal(pkg) {
-      var link = 'https://portal.gradeline.example/rfq/' + pkg.id.toLowerCase() + '-' + d.bid.id.toLowerCase();
-      try { navigator.clipboard.writeText(link).then(function () { p.toast('Portal link copied. Subs quote in the browser, no PDF.'); }, function () { p.toast(link); }); } catch (e) { p.toast(link); }
-    }
+    function enter(pkg, quoteId) { p.openDialog({ kind: 'quote', packageId: pkg.id, quoteId: quoteId || null }); }
     return h('div', { className: 'gl-quotes' },
       h('div', { className: 'gl-quotes__head' },
         h('div', { className: 'gl-tiles' },
           h(M.StatTile, { size: 's', label: 'Packages', value: String(d.packages.length), supporting: d.packages.filter(function (x) { return x.selected || x.selfSelected; }).length + ' picked' }),
           h(M.StatTile, { size: 's', label: 'Quotes received', value: String(d.packages.reduce(function (a, x) { return a + x.quotes.filter(function (q) { return q.status === 'received'; }).length; }, 0)), supporting: d.packages.reduce(function (a, x) { return a + x.quotes.filter(function (q) { return q.status === 'pending'; }).length; }, 0) + ' still out', tone: 'warning' }),
           h(M.StatTile, { size: 's', label: 'Subcontract total', value: money(d.totals.sub), supporting: (d.totals.direct ? Math.round(d.totals.sub / d.totals.direct * 100) : 0) + '% of direct cost' })),
-        h(M.Button, { variant: 'filled', icon: 'send', size: 's', onClick: function () { p.openDialog({ kind: 'rfq' }); } }, 'New RFQ')),
-      d.packages.length ? d.packages.map(function (pkg) { return h(PackageCard, { key: pkg.id, pkg: pkg, d: d, pick: pick, remind: remind, portal: portal, highlight: p.focusPackageId === pkg.id }); })
-        : h(M.EmptyState, { icon: 'request_quote', headline: 'No quotes yet', body: 'Send a request to your subs and suppliers. Replies land here, side by side.', action: h(M.Button, { icon: 'send', onClick: function () { p.openDialog({ kind: 'rfq' }); } }, 'Send RFQs') }));
+        h(M.Button, { variant: 'filled', icon: 'add', size: 's', onClick: function () { p.openDialog({ kind: 'package' }); } }, 'New quote package')),
+      d.packages.length ? d.packages.map(function (pkg) { return h(PackageCard, { key: pkg.id, pkg: pkg, d: d, pick: pick, enter: enter, highlight: p.focusPackageId === pkg.id }); })
+        : h(M.EmptyState, { icon: 'request_quote', headline: 'No quote packages yet', body: 'Group the pay items a sub or supplier will price, then type in each quote as it comes in by phone or email. Quotes line up side by side against your plug.', action: h(M.Button, { icon: 'add', onClick: function () { p.openDialog({ kind: 'package' }); } }, 'New quote package') }));
   }
 
   function PackageCard(p) {
@@ -158,7 +157,7 @@ import * as R from 'react';
       { key: 'plug', header: 'Plug', type: 'money', decimals: 2, width: 96, render: function (r) { return r.kind === 'total' ? GL.fmtMoney(pkg.plugTotal) : r.plug != null ? GL.fmtMoney(r.plug, 2) : h('span', { className: 'gl-dim' }, '–'); } }];
     pkg.quotes.forEach(function (q) {
       var sel = pkg.selectedQuoteId === q.id;
-      cols.push({ key: q.id, type: 'money', decimals: 2, width: 150, header: h('span', { className: 'gl-qhead' + (sel ? ' is-selected' : '') }, h('span', { className: 'gl-qhead__name' }, q.vendor ? q.vendor.name : 'Vendor'), h(M.StatusChip, { status: sel ? 'selected' : q.status, size: 's' })),
+      cols.push({ key: q.id, type: 'money', decimals: 2, width: 170, header: h('span', { className: 'gl-qhead' + (sel ? ' is-selected' : '') }, h('span', { className: 'gl-qhead__name' }, q.vendor ? q.vendor.name : 'Vendor'), h('span', { className: 'gl-qhead__row' }, h(M.StatusChip, { status: sel ? 'selected' : q.status, label: q.lump != null && q.status === 'received' && !sel ? 'Lump sum' : undefined, size: 's' }), h(M.IconButton, { icon: q.status === 'pending' ? 'edit_note' : 'edit', label: (q.status === 'pending' ? 'Enter quote from ' : 'Edit quote from ') + (q.vendor ? q.vendor.name : 'vendor'), size: 'xs', onClick: function () { p.enter(pkg, q.id); } }))),
         render: function (r) {
           if (r.kind === 'total') return q.total != null ? h('span', { className: sel ? 'gl-strong' : '' }, GL.fmtMoney(q.total), q.vsPlug != null ? h('span', { className: 'gl-vs ' + (q.vsPlug <= 0 ? 'is-under' : 'is-over') }, (q.vsPlug <= 0 ? ' ' : ' +') + (q.vsPlug * 100).toFixed(1) + '%') : null) : h('span', { className: 'gl-dim' }, q.status === 'pending' ? 'waiting' : '–');
           var up = q.unitPrices && q.unitPrices[r.itemId];
@@ -170,17 +169,16 @@ import * as R from 'react';
     if (pkg.selfTotal != null) {
       var selSelf = pkg.selfSelected;
       cols.push({ key: 'self', type: 'money', width: 150, header: h('span', { className: 'gl-qhead' + (selSelf ? ' is-selected' : '') }, h('span', { className: 'gl-qhead__name' }, 'Self-perform'), h(M.StatusChip, { status: selSelf ? 'selected' : 'ok', label: selSelf ? 'Selected' : 'Our crew', size: 's' })),
-        render: function (r) { if (r.kind === 'total') return h('span', { className: selSelf ? 'gl-strong' : '' }, GL.fmtMoney(pkg.selfTotal)); var l = pkg.lines[0]; return GL.fmtMoney(pkg.selfTotal / (l.qty || 1), 2); } });
+        render: function (r) { if (r.kind === 'total') return h('span', { className: selSelf ? 'gl-strong' : '' }, GL.fmtMoney(pkg.selfTotal)); var s = pkg.selfSplit; return s ? GL.fmtMoney(s.labor + s.equipment + s.material, 2) : ''; } });
     }
     var rows = pkg.lines.map(function (l) { var t = d.est.tasks.find(function (x) { return x.packageId === pkg.id && x.itemId === l.itemId; }); return { id: l.itemId, itemId: l.itemId, code: l.item ? l.item.code : '', label: l.item ? l.item.name : '', qty: l.qty, unit: l.unit, plug: t ? t.plug : null }; })
       .concat([{ id: 'total', kind: 'total', label: 'Package total' }]);
     var bestNote = pkg.best && pkg.selected && pkg.best.id !== pkg.selected.id && pkg.selected.total != null ? pkg.best.vendor.name + ' is ' + GL.fmtMoney(pkg.selected.total - pkg.best.total) + ' lower than your pick.' : null;
     return h('div', { className: 'gl-pkg' + (p.highlight ? ' is-focus' : '') },
       h('div', { className: 'gl-pkg__head' },
-        h('div', null, h('h3', { className: 'gl-pkg__title' }, pkg.name), h('div', { className: 'gl-pkg__meta body-small' }, 'Sent ' + GL.fmtDate(pkg.sentAt) + ' · ' + received.length + ' of ' + pkg.quotes.length + ' received' + (pkg.best ? ' · low ' + pkg.best.vendor.name + ' ' + GL.fmtMoney(pkg.best.total) : ''))),
+        h('div', null, h('h3', { className: 'gl-pkg__title' }, pkg.name), h('div', { className: 'gl-pkg__meta body-small' }, received.length + ' of ' + pkg.quotes.length + ' quote' + (pkg.quotes.length === 1 ? '' : 's') + ' in' + (pkg.best ? ' · low ' + pkg.best.vendor.name + ' ' + GL.fmtMoney(pkg.best.total) : '') + (pkg.sentAt ? ' · started ' + GL.fmtDate(pkg.sentAt) : ''))),
         h('div', { className: 'gl-pkg__actions' },
-          h(M.Button, { variant: 'text', size: 'xs', icon: 'link', onClick: function () { p.portal(pkg); } }, 'Portal link'),
-          pkg.quotes.filter(function (q) { return q.status === 'pending'; }).map(function (q) { return h(M.Button, { key: q.id, variant: 'text', size: 'xs', icon: 'notifications', onClick: function () { p.remind(q); } }, 'Remind ' + q.vendor.name.split(' ')[0]); }))),
+          h(M.Button, { variant: 'tonal', size: 'xs', icon: 'add', onClick: function () { p.enter(pkg, null); } }, 'Add quote'))),
       bestNote ? h(M.Banner, { tone: 'info', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { p.pick(pkg, pkg.best.id); } }, 'Use ' + pkg.best.vendor.name) }, bestNote) : null,
       h(M.DataGrid, { label: 'Quotes for ' + pkg.name, columns: cols, rows: rows, density: 'dense' }),
       h('div', { className: 'gl-pkg__pick' },
@@ -197,7 +195,9 @@ import * as R from 'react';
     var target = useState('');
     var due = GL.daysUntil(d.bid.due);
     function setMk(key, v, label) {
-      var n = Number(v); if (isNaN(n)) return;
+      var str = String(v).trim(); if (str === '') return; // an empty box keeps the old rate
+      var n = Math.round(Number(str) * 1000) / 1000; if (isNaN(n) || n < 0 || n > 100) { p.toast('Use a percent from 0 to 100.'); return; }
+      if (n === mk[key]) return;
       api.update(function (doc) { doc.estimates[doc.currentBidId].markup[key] = n; }, { title: 'Set ' + label + ' to ' + n + '%', detail: 'from ' + mk[key] + '%', icon: 'percent' });
     }
     function balance() {
@@ -256,7 +256,7 @@ import * as R from 'react';
           h('div', { className: 'title-medium' }, 'Markup'),
           h('div', { className: 'gl-markup' },
             [['overhead', 'Overhead'], ['profit', 'Profit'], ['bond', 'Bond'], ['tax', 'Tax on materials']].map(function (k) {
-              return h(GL.Field, { key: k[0], label: k[1], value: String(mk[k[0]]), suffix: '%', type: 'number', step: '0.1', min: '0', inputMode: 'decimal', onChange: function (v) { setMk(k[0], v, k[1].toLowerCase()); }, className: 'gl-field gl-field--pct' });
+              return h(PctField, { key: k[0] + ':' + mk[k[0]], label: k[1], value: mk[k[0]], onCommit: function (v) { setMk(k[0], v, k[1].toLowerCase()); } });
             })),
           h('div', { className: 'body-small gl-dim' }, 'Multiplier ' + d.multiplier.toFixed(4) + ' on cost. Overhead on direct cost, profit on top, bond on the subtotal.')),
         h('div', { className: 'gl-card' },
@@ -269,6 +269,9 @@ import * as R from 'react';
         onEdit: function (row, col, value) {
           if (col.key !== 'unitPrice') return;
           var it = d.items.find(function (i) { return i.id === row.itemId; });
+          if (value == null || value === '') { if (it.locked) p.toggleLock(row.itemId); return; }
+          if (isNaN(value) || value < 0) { p.toast('A unit price cannot be negative.'); return; }
+          value = Math.round(value * 100) / 100;
           api.update(function (doc) { doc.estimates[doc.currentBidId].locks[row.itemId] = value; }, { title: 'Locked price on ' + it.code, detail: GL.fmtMoney(it.unitPrice, 2) + ' → ' + GL.fmtMoney(value, 2) + ' / ' + it.unit, icon: 'lock' });
           p.toast('Price locked at ' + GL.fmtMoney(value, 2) + ' / ' + it.unit + '.', 'Undo', api.undo);
         } }),
@@ -277,6 +280,12 @@ import * as R from 'react';
         h(M.Button, { variant: 'tonal', icon: 'description', onClick: function () { api.ui({ tab: 'form', formView: 'form' }); } }, 'Bid form'),
         d.bid.status === 'submitted' ? h(M.Button, { variant: 'filled', icon: 'lock_open', onClick: function () { p.setBidStatus('in-progress'); } }, 'Reopen bid')
           : h(M.Button, { variant: 'filled', icon: 'send', disabled: d.errors > 0, onClick: function () { p.openDialog({ kind: 'submit' }); } }, 'Mark as submitted')));
+  }
+  // A percent box that saves once: on Enter or when focus leaves. Esc puts the saved value back.
+  function PctField(p) {
+    var st = useState(String(p.value));
+    return h('div', { onBlur: function () { p.onCommit(st[0]); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); p.onCommit(st[0]); } else if (e.key === 'Escape') st[1](String(p.value)); } },
+      h(GL.Field, { label: p.label, value: st[0], suffix: '%', inputMode: 'decimal', onChange: st[1], className: 'gl-field gl-field--pct' }));
   }
 
   /* ---------- Checks tab ---------- */
@@ -289,7 +298,7 @@ import * as R from 'react';
         h(M.StatTile, { label: 'Must fix', value: String(d.errors), tone: d.errors ? 'error' : 'success', icon: d.errors ? 'error' : 'check_circle', supporting: d.errors ? 'blocks submission' : 'nothing blocking' }),
         h(M.StatTile, { label: 'Worth a look', value: String(d.warnings), tone: d.warnings ? 'warning' : 'default', icon: 'warning' }),
         h(M.StatTile, { label: 'Passed', value: String(passed), tone: 'default', icon: 'task_alt' })),
-      h('p', { className: 'body-medium gl-dim gl-checks__intro' }, 'Checks run on every change, so there is no wizard to remember before bid day. The same flags show on the sheet rows.'),
+      h('p', { className: 'body-medium gl-dim gl-checks__intro' }, 'Checks run after every change. The same flags show on the sheet rows.'),
       groups.map(function (g) {
         var list = d.checks.filter(function (c) { return c.sev === g[0]; });
         if (!list.length) return null;
@@ -314,7 +323,7 @@ import * as R from 'react';
       body = h('div', { className: 'gl-paper' },
         h('div', { className: 'gl-paper__head' },
           h('div', null, h('div', { className: 'gl-paper__eyebrow' }, 'Schedule of bid items'), h('h2', { className: 'gl-paper__title' }, d.bid.name), h('div', { className: 'gl-paper__meta' }, 'Owner: ' + d.bid.owner + ' · Bids due ' + GL.fmtDate(d.bid.due) + ' at ' + d.bid.dueTime)),
-          h('div', { className: 'gl-paper__bidder' }, h('div', null, 'Bidder: Cascade Civil Constructors, Inc. (sample)'), h('div', null, 'Estimator: ' + d.bid.estimator), h('div', null, 'Prepared ' + today))),
+          h('div', { className: 'gl-paper__bidder' }, h('div', null, 'Bidder: ' + (p.company || '')), h('div', null, 'Estimator: ' + d.bid.estimator), h('div', null, 'Prepared ' + today))),
         h('table', { className: 'gl-paper__table' },
           h('thead', null, h('tr', null, h('th', null, 'Item'), h('th', null, 'Description'), h('th', { className: 'num' }, 'Quantity'), h('th', null, 'Unit'), h('th', { className: 'num' }, 'Unit price'), h('th', { className: 'num' }, 'Amount'))),
           h('tbody', null, d.items.map(function (it) { return h('tr', { key: it.id }, h('td', null, it.code), h('td', null, it.name), h('td', { className: 'num' }, GL.fmtNum(it.qty)), h('td', null, it.unit), h('td', { className: 'num' }, GL.fmtMoney(it.unitPrice, 2)), h('td', { className: 'num' }, GL.fmtMoney(it.ext, 2))); })),
@@ -346,7 +355,7 @@ import * as R from 'react';
           h(M.Button, { variant: 'filled', icon: 'download', onClick: function () { p.openDialog({ kind: 'export' }); } }, 'Download CSV'),
           h('div', { className: 'body-small gl-dim' }, sys === 'qbd' || sys === 'qbo' ? 'QuickBooks gets an estimate: one line per pay item with quantity, unit price and amount. The cost split rides along for job costing.' : 'Phase codes come from the pay item codes; cost types map to ' + systems[sys] + "'s labor, equipment, material, subcontract and other.")),
         h(M.DataGrid, { label: 'Budget export preview', density: 'dense', zebra: true, rows: d.items.map(function (it) { return { id: it.id, phase: it.code, desc: it.name, qty: it.qty, unit: it.unit, labor: it.labor || null, equipment: it.equipment || null, material: it.material || null, sub: it.sub || null, other: it.other || null, total: it.direct }; }), footer: true, columns: [
-          { key: 'phase', header: sys === 'qbo' || sys === 'qbd' ? 'Item' : 'Phase', width: 90 }, { key: 'desc', header: 'Description', width: 260 }, { key: 'qty', header: 'Qty', type: 'number', width: 90 }, { key: 'unit', header: 'UM', width: 60, align: 'center' },
+          { key: 'phase', header: sys === 'qbo' || sys === 'qbd' ? 'Item' : 'Phase', width: 90 }, { key: 'desc', header: 'Description', width: 260 }, { key: 'qty', header: 'Qty', type: 'number', decimals: 2, width: 90, render: function (r) { return GL.fmtNum(r.qty, r.qty % 1 ? 2 : 0); } }, { key: 'unit', header: 'UM', width: 60, align: 'center' },
           { key: 'labor', header: sys === 'sage' ? 'L (1)' : 'Labor', type: 'money', category: 'labor', placeholder: '–', footer: d.totals.labor }, { key: 'equipment', header: sys === 'sage' ? 'E (2)' : 'Equipment', type: 'money', category: 'equipment', placeholder: '–', footer: d.totals.equipment },
           { key: 'material', header: sys === 'sage' ? 'M (3)' : 'Material', type: 'money', category: 'material', placeholder: '–', footer: d.totals.material }, { key: 'sub', header: sys === 'sage' ? 'S (4)' : 'Subcontract', type: 'money', category: 'sub', placeholder: '–', footer: d.totals.sub },
           { key: 'other', header: sys === 'sage' ? 'O (5)' : 'Other', type: 'money', category: 'other', placeholder: '–', footer: d.totals.other }, { key: 'total', header: 'Budget', type: 'money', footer: d.totals.direct }] }));
@@ -355,6 +364,7 @@ import * as R from 'react';
       h('div', { className: 'gl-form__bar' },
         h(M.SegmentedButton, { label: 'Document', value: view, onChange: function (v) { api.ui({ formView: v }); }, segments: [{ value: 'form', label: 'Bid form', icon: 'description' }, { value: 'crew', label: 'Crew plan', icon: 'groups' }, { value: 'export', label: 'Budget export', icon: 'account_balance' }] }),
         view === 'form' ? h(M.Button, { variant: 'tonal', size: 's', icon: 'download', onClick: function () { p.downloadForm(); } }, 'Save bid form') : null),
+      view === 'form' && d.errors ? h(M.Banner, { tone: 'warning', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { api.ui({ tab: 'checks' }); } }, 'Show checks') }, d.errors + ' check' + (d.errors > 1 ? 's' : '') + ' must clear before this bid goes out. You can still save a draft of the form.') : null,
       body);
   }
 
