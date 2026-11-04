@@ -1,4 +1,4 @@
-/* ===== Gradeline estimate workspace: sheet, quotes, bid day, checks, bid form, side pane ===== */
+/* ===== Benchstake estimate workspace: sheet, quotes, bid day, checks, bid form, side pane ===== */
 import { GL } from './gl.js';
 import { M3 as M } from '../ds/index.js';
 import * as R from 'react';

@@ -7,7 +7,7 @@ import { initialsOf } from '../lib/supabase.js';
 const h = R.createElement, useState = R.useState, useEffect = R.useEffect, Frag = R.Fragment;
 
 function Brand(p) {
-  return h('div', { className: 'gl-auth__brand' }, h(GL.Mark, { size: 36 }), h('span', { className: 'gl-auth__name' }, 'Gradeline'), p.tag ? h('span', { className: 'gl-auth__tag' }, p.tag) : null);
+  return h('div', { className: 'gl-auth__brand' }, h(GL.Mark, { size: 36 }), h('span', { className: 'gl-auth__name' }, 'Benchstake'), p.tag ? h('span', { className: 'gl-auth__tag' }, p.tag) : null);
 }
 
 /* ---------- Sign in ---------- */

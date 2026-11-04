@@ -1,4 +1,4 @@
-/* ===== Gradeline sample data (fictional contractor, vendors and people) ===== */
+/* ===== Benchstake sample data (fictional contractor, vendors and people) ===== */
 import { GL } from './gl.js';
 GL.VERSION = 1;
 

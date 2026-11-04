@@ -1,4 +1,4 @@
-/* ===== Gradeline estimating engine: everything derived from the document ===== */
+/* ===== Benchstake estimating engine: everything derived from the document ===== */
 import { GL } from './gl.js';
 import { M3 } from '../ds/index.js';
 (function () {

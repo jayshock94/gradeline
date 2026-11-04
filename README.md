@@ -1,8 +1,10 @@
-# Gradeline
+# Benchstake
+
+Live at https://benchstake.com (the repo and some internal names still say gradeline).
 
 Estimating and bidding for heavy civil contractors. Pay items, crews and production rates, sub and supplier quotes side by side, bid-day markup with locked prices, checks that run as you type, full undo with a shared history, a bid form and a QuickBooks export.
 
-Built on the Gradeline design system (a fork of a Material 3 system), so every screen stays on brand.
+Built on the Gradeline design system (the design system artifact keeps that name) (a fork of a Material 3 system), so every screen stays on brand.
 
 ## What is in the box
 

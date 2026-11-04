@@ -1,4 +1,4 @@
-/* ===== Gradeline screens: bids, estimate wrapper, library, insights, dialogs, shell ===== */
+/* ===== Benchstake screens: bids, estimate wrapper, library, insights, dialogs, shell ===== */
 import { GL } from './gl.js';
 import { M3 as M } from '../ds/index.js';
 import * as R from 'react';
@@ -199,7 +199,7 @@ import * as R from 'react';
             h(M.Button, { variant: 'tonal', size: 'xs', icon: 'add', onClick: function () { p.openDialog({ kind: 'libedit', target: tab }); } }, { crews: 'Add crew', labor: 'Add labor class', equipment: 'Add machine', materials: 'Add material', vendors: 'Add company' }[tab]))),
         grids[tab]),
       allDone ? null : h('aside', { className: 'gl-library__side' },
-        h('div', { className: 'gl-card' }, h(M.SetupSteps, { headline: 'Set up Gradeline', steps: steps }))));
+        h('div', { className: 'gl-card' }, h(M.SetupSteps, { headline: 'Set up Benchstake', steps: steps }))));
   }
 
   /* ---------- Insights screen ---------- */
@@ -828,7 +828,7 @@ import * as R from 'react';
       menu.node,
       compact ? null : h(M.NavigationRail, { items: navItems, value: screen, onChange: function (v) { api.ui({ screen: v }); }, expanded: ui.railExpanded !== false && width >= 1100, onMenu: width >= 1100 ? function () { api.ui({ railExpanded: ui.railExpanded === false }); } : undefined, fab: 'add', fabLabel: 'New bid', onFab: function () { dialog[1]({ kind: 'newbid' }); }, label: 'Main', className: 'gl-rail' }),
       h('div', { className: 'gl-main' },
-        h(M.TopAppBar, { className: 'gl-appbar', title: h('span', { className: 'gl-appbar__title' }, compact ? null : h(GL.Mark, null), h('span', { className: 'gl-appbar__brand' }, 'Gradeline'), h('span', { className: 'gl-appbar__sep' }, '/'), h('span', { className: 'gl-appbar__screen' }, titles[screen])),
+        h(M.TopAppBar, { className: 'gl-appbar', title: h('span', { className: 'gl-appbar__title' }, compact ? null : h(GL.Mark, null), h('span', { className: 'gl-appbar__brand' }, 'Benchstake'), h('span', { className: 'gl-appbar__sep' }, '/'), h('span', { className: 'gl-appbar__screen' }, titles[screen])),
           actions: h(Frag, null,
             h(GL.Tip, { text: ui.fieldMode ? 'Show dollars' : 'Hide dollars (field mode)' }, h(M.IconButton, { icon: ui.fieldMode ? 'visibility_off' : 'visibility', label: ui.fieldMode ? 'Show dollars' : 'Hide dollars', toggle: true, selected: !!ui.fieldMode, onClick: function () { api.ui({ fieldMode: !ui.fieldMode }); toast(ui.fieldMode ? 'Dollars shown.' : 'Field mode: every amount is hidden until you turn it back on.'); } })),
             h(GL.Tip, { text: 'Theme' }, h(M.IconButton, { icon: themeIcon, label: 'Theme', onClick: function (e) { menu.open(e, [['system', 'Match system', 'contrast'], ['light', 'Light', 'light_mode'], ['dark', 'Dark', 'dark_mode'], ['sunlight', 'Sunlight (outdoor tablet)', 'wb_sunny']].map(function (t) { return { label: t[1], icon: t[2], selected: (ui.theme || 'system') === t[0], onClick: function () { api.ui({ theme: t[0] }); } }; }), 'Theme'); } })),

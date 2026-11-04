@@ -1,4 +1,4 @@
-# Gradeline — notes for agents working in this repo
+# Benchstake (repo: gradeline) — notes for agents working in this repo
 
 - Plain JavaScript React 18, no JSX: elements are built with `h(...)` (`React.createElement`). Keep that style; there is no Babel/JSX step beyond Vite's default.
 - `src/app/gl.js` exports the shared `GL` namespace; the app modules (`data.js`, `calc.js`, `core.js`, `estimate.js`, `screens.js`) attach to it in import order (see `src/main.js`). `calc.js` holds the estimating engine (`GL.derive`) and the checks; keep business rules there, not in screens.

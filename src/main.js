@@ -1,4 +1,4 @@
-// Gradeline entry: routing, sign-in gate, and the choice between the demo store and the cloud store.
+// Benchstake entry: routing, sign-in gate, and the choice between the demo store and the cloud store.
 import * as R from 'react';
 import { createRoot } from 'react-dom/client';
 import { M3 as M } from './ds/index.js';
@@ -95,7 +95,7 @@ function Root() {
 function Landing(p) {
   return h('div', { className: 'gl-auth gl-landing' },
     h('div', { className: 'gl-auth__card gl-auth__card--wide' },
-      h('div', { className: 'gl-auth__brand' }, h(GL.Mark, { size: 36 }), h('span', { className: 'gl-auth__name' }, 'Gradeline')),
+      h('div', { className: 'gl-auth__brand' }, h(GL.Mark, { size: 36 }), h('span', { className: 'gl-auth__name' }, 'Benchstake')),
       h('h1', { className: 'headline-medium', style: { margin: '8px 0 4px' } }, 'Estimating and bidding for heavy civil, built for bid day.'),
       h('p', { className: 'body-large gl-dim' }, 'Crews, production rates and sub quotes in one sheet. Full undo. Checks that run as you type. A bid form and a budget export when you are done.'),
       h('div', { className: 'gl-auth__actions', style: { justifyContent: 'flex-start' } },

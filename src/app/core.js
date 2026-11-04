@@ -1,4 +1,4 @@
-/* ===== Gradeline app core: store with undo history, shell, shared widgets ===== */
+/* ===== Benchstake app core: store with undo history, shell, shared widgets ===== */
 import { GL } from './gl.js';
 import { M3 as M } from '../ds/index.js';
 import * as R from 'react';
@@ -70,7 +70,7 @@ import * as R from 'react';
   }
   GL.Section = Section;
 
-  function Mark(p) { // Gradeline mark: a stepped grade line in a rounded square
+  function Mark(p) { // Benchstake mark: a stepped grade line in a rounded square
     var s = p.size || 28;
     return h('svg', { width: s, height: s, viewBox: '0 0 28 28', 'aria-hidden': 'true', className: 'gl-mark' },
       h('rect', { x: 0, y: 0, width: 28, height: 28, rx: 8, fill: 'var(--primary-container)' }),

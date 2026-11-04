@@ -1,4 +1,4 @@
-/* ===== Gradeline app layout (every color is a Gradeline design-system token) ===== */
+/* ===== Benchstake app layout (every color is a Benchstake design-system token) ===== */
 /* Layout: rail + column (app bar, tabs, scrolling content); the estimate adds a 360px summary pane on wide windows. */
 html, body { height: 100%; }
 body { margin: 0; background: var(--surface); color: var(--on-surface); font-family: var(--font-plain); font-size: 14px; line-height: 20px; letter-spacing: 0.25px; -webkit-font-smoothing: antialiased; }
