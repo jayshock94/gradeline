@@ -14,6 +14,7 @@ function Brand(p) {
 export function LoginPage(p) {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const redirect = window.location.origin + '/app';
@@ -35,23 +36,37 @@ export function LoginPage(p) {
     setBusy(true); setErr(null);
     const { error } = await p.supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: redirect } });
     setBusy(false);
-    if (error) setErr(error.message); else setSent(true);
+    if (error) setErr(/rate limit/i.test(error.message) ? 'Too many emails in a short time. Wait a minute, then try again.' : error.message); else { setSent(true); setCode(''); }
+  }
+  // the email carries a code as well as a link: typing the code works on any device and in any browser
+  async function verify(e) {
+    e.preventDefault();
+    const token = code.replace(/\s+/g, '');
+    if (!/^\d{6,10}$/.test(token)) { setErr('Enter the code from the email. It is all numbers.'); return; }
+    setBusy(true); setErr(null);
+    const { error } = await p.supabase.auth.verifyOtp({ email: email.trim(), token, type: 'email' });
+    setBusy(false);
+    if (error) setErr(/expired|invalid/i.test(error.message) ? 'That code did not work. It may have expired; send a new one.' : error.message);
   }
   return h('div', { className: 'gl-auth' },
     h('div', { className: 'gl-auth__card' },
       h(Brand, { tag: 'Estimating and bidding for heavy civil' }),
       sent ? h(Frag, null,
         h('h1', { className: 'headline-small' }, 'Check your email'),
-        h('p', { className: 'body-medium' }, 'We sent a sign-in link to ', h('strong', null, email), '. Open it on this device and you are in. The link works once and expires in an hour.'),
-        h(M.Button, { variant: 'text', onClick: () => setSent(false) }, 'Use a different email'))
+        h('p', { className: 'body-medium' }, 'We sent a code to ', h('strong', null, email), '. Type it here to sign in. It works once and expires in an hour.'),
+        h('form', { onSubmit: verify, className: 'gl-auth__form' },
+          h(M.TextField, { variant: 'outlined', label: 'Code from the email', value: code, onChange: setCode, inputMode: 'numeric', autoComplete: 'one-time-code', className: 'gl-auth__field', required: true }),
+          h(M.Button, { variant: 'filled', size: 'm', icon: 'login', disabled: busy, type: 'submit' }, busy ? 'Signing in…' : 'Sign in')),
+        err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
+        h('p', { className: 'body-small gl-dim' }, 'Nothing there? Check spam, or ', h('button', { type: 'button', className: 'gl-link gl-linkbtn', onClick: magic }, 'send a new code'), '. Wrong address? ', h('button', { type: 'button', className: 'gl-link gl-linkbtn', onClick: () => { setSent(false); setErr(null); } }, 'Use a different email'), '.'))
       : h(Frag, null,
         h('h1', { className: 'headline-small' }, 'Sign in'),
-        h('p', { className: 'body-medium gl-dim' }, googleOn ? 'No passwords. Use your Google account, or get a one-time link by email.' : 'No passwords. Enter your email and we send you a one-time sign-in link.'),
+        h('p', { className: 'body-medium gl-dim' }, googleOn ? 'No passwords. Use your Google account, or get a one-time code by email.' : 'No passwords. Enter your email and we send you a one-time code.'),
         googleOn ? h(M.Button, { variant: 'filled', size: 'm', icon: 'login', disabled: busy, onClick: google, className: 'gl-auth__google' }, 'Continue with Google') : null,
         googleOn ? h('div', { className: 'gl-auth__or' }, h('span', null, 'or')) : null,
         h('form', { onSubmit: magic, className: 'gl-auth__form' },
           h(M.TextField, { variant: 'outlined', label: 'Work email', type: 'email', value: email, onChange: setEmail, autoComplete: 'email', className: 'gl-auth__field', required: true }),
-          h(M.Button, { variant: googleOn ? 'tonal' : 'filled', size: 'm', icon: 'mail', disabled: busy, type: 'submit' }, busy ? 'Sending…' : 'Email me a sign-in link')),
+          h(M.Button, { variant: googleOn ? 'tonal' : 'filled', size: 'm', icon: 'mail', disabled: busy, type: 'submit' }, busy ? 'Sending…' : 'Email me a code')),
         err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
         h(M.Divider, null),
         h('p', { className: 'body-small gl-dim' }, 'Just looking? ', h('a', { href: '/demo', className: 'gl-link' }, 'Open the demo'), ' with a sample company. Nothing to sign up for.'))));

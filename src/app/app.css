@@ -263,3 +263,5 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-field--count { width: 110px; }
 .gl-crewtotal { display: flex; flex-wrap: wrap; gap: var(--space-5); align-items: baseline; padding: var(--space-3) var(--space-4); border-radius: var(--corner-medium); background: var(--surface-container); font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .gl-crewrow { grid-template-columns: 90px 1fr 40px; } .gl-crewrow__rate { display: none; } }
+.gl-linkbtn { border: 0; padding: 0; background: none; font: inherit; cursor: pointer; }
+.gl-linkbtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--corner-extra-small); }
