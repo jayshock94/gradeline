@@ -36,7 +36,11 @@ export function LoginPage(p) {
     setBusy(true); setErr(null);
     const { error } = await p.supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: redirect } });
     setBusy(false);
-    if (error) setErr(/rate limit/i.test(error.message) ? 'Too many emails in a short time. Wait a minute, then try again.' : error.message); else { setSent(true); setCode(''); }
+    if (error) {
+      const wait = (error.message.match(/after (\d+) seconds?/i) || [])[1];
+      setErr(wait ? 'A code was just sent. Wait ' + wait + ' seconds, then try again, or use the code already in your inbox.' : /rate limit/i.test(error.message) ? 'Too many emails in a short time. Wait a minute, then try again.' : error.message);
+      if (wait) setSent(true);
+    } else { setSent(true); setCode(''); }
   }
   // the email carries a code as well as a link: typing the code works on any device and in any browser
   async function verify(e) {
