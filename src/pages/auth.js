@@ -28,6 +28,45 @@ export function guessCompany(email) {
 // Google refuses its sign-in inside apps' built-in browsers, so don't offer a button that will fail there.
 function inAppBrowser() { return /\bwv\b|FBAN|FBAV|Instagram|LinkedInApp|Line\/|Snapchat|TikTok|GSA\//.test(navigator.userAgent || ''); }
 
+/* ---------- Google button ---------- */
+// Google's own button signs in on benchstake.com, so Google shows that address instead of the Supabase one.
+// Anywhere else, or if Google's script can't load, it falls back to the redirect sign-in. The client ID is public.
+const GOOGLE_CLIENT_ID = '786660474128-rr8rtvpimpaprvo153nq1s80d9djlfn7.apps.googleusercontent.com';
+const GOOGLE_ORIGIN = 'https://benchstake.com';
+function loadGoogle() {
+  if (window.google && window.google.accounts) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client'; s.async = true; s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+async function makeNonce() {
+  const raw = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+  return { raw, hashed: Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('') };
+}
+function GoogleButton(p) {
+  const box = R.useRef(null);
+  const [fallback, setFallback] = useState(window.location.origin !== GOOGLE_ORIGIN);
+  useEffect(() => {
+    if (fallback) return undefined;
+    let alive = true;
+    (async () => {
+      try {
+        await loadGoogle();
+        const nonce = await makeNonce();
+        if (!alive || !box.current) return;
+        window.google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, nonce: nonce.hashed, callback: r => p.onCredential(r.credential, nonce.raw) });
+        window.google.accounts.id.renderButton(box.current, { type: 'standard', theme: 'outline', size: 'large', text: 'continue_with', shape: 'pill', logo_alignment: 'center', width: Math.min(400, box.current.clientWidth || 320) });
+      } catch (e) { if (alive) setFallback(true); }
+    })();
+    return () => { alive = false; };
+  }, [fallback]);
+  if (fallback) return h(M.Button, { variant: 'outlined', size: 'm', disabled: p.disabled, onClick: p.onRedirect, className: 'gl-auth__google' }, 'Continue with Google');
+  return h('div', { ref: box, className: 'gl-auth__gbutton' });
+}
+
 /* ---------- Sign in ---------- */
 export function LoginPage(p) {
   const [email, setEmail] = useState('');
@@ -54,6 +93,12 @@ export function LoginPage(p) {
     setBusy(true); setErr(null);
     const { error } = await p.supabase.auth.signInWithOAuth({ provider, options: { redirectTo: redirect, scopes: provider === 'azure' ? 'email' : undefined } });
     if (error) { setErr('That sign-in didn’t work. Try again, or use your email.'); setBusy(false); }
+  }
+  async function googleCredential(token, nonce) {
+    setBusy(true); setErr(null);
+    const { error } = await p.supabase.auth.signInWithIdToken({ provider: 'google', token, nonce });
+    setBusy(false);
+    if (error) setErr('That sign-in didn’t work. Try again, or use your email.');
   }
   async function sendCode(address) {
     setBusy(true); setErr(null);
@@ -108,7 +153,7 @@ export function LoginPage(p) {
       : h(Frag, null,
         h('h1', { className: 'headline-small' }, 'Welcome to Benchstake'),
         h('p', { className: 'body-medium gl-dim' }, 'New or returning, start here. No password.'),
-        providers.google ? h(M.Button, { variant: 'outlined', size: 'm', disabled: busy, onClick: () => oauth('google'), className: 'gl-auth__google' }, 'Continue with Google') : null,
+        providers.google ? h(GoogleButton, { disabled: busy, onCredential: googleCredential, onRedirect: () => oauth('google') }) : null,
         providers.azure ? h(M.Button, { variant: 'outlined', size: 'm', disabled: busy, onClick: () => oauth('azure'), className: 'gl-auth__google' }, 'Continue with Microsoft') : null,
         anyProvider ? h('div', { className: 'gl-auth__or' }, h('span', null, 'or use your email')) : null,
         h('form', { onSubmit: submitEmail, className: 'gl-auth__form', noValidate: true },
