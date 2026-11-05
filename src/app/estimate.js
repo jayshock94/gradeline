@@ -197,11 +197,11 @@ import * as R from 'react';
           h('div', { className: 'gl-pkg__titlerow' },
             h('h3', { className: 'gl-pkg__title' }, pkg.name),
             // the chips say what the tab badge and the tiles are counting
-            pending.length ? h(M.StatusChip, { status: 'pending', label: 'Waiting on ' + pending.map(function (q) { return q.vendor ? q.vendor.name : 'a vendor'; }).join(', '), title: 'Type the quote in when it arrives' }) : null,
+            // names up to two vendors; past that the count reads better than a list
+            pending.length ? h(M.StatusChip, { status: 'pending', label: 'Waiting on ' + (pending.length > 2 ? pending.length + ' quotes' : pending.map(function (q) { return q.vendor ? q.vendor.name : 'a vendor'; }).join(' and ')), title: pending.map(function (q) { return q.vendor ? q.vendor.name : 'a vendor'; }).join(', ') + ': type the quote in when it arrives' }) : null,
             picked ? null : h(M.StatusChip, { status: 'info', icon: 'radio_button_unchecked', label: 'On plug, nothing picked' })),
           h('div', { className: 'gl-pkg__meta body-small' }, received.length + ' of ' + pkg.quotes.length + ' quote' + (pkg.quotes.length === 1 ? '' : 's') + ' in' + (pkg.best ? ' · low ' + pkg.best.vendor.name + ' ' + GL.fmtMoney(pkg.best.total) : '') + (picked ? ' · using ' + picked : '') + (pkg.sentAt ? ' · started ' + GL.fmtDate(pkg.sentAt) : ''))),
         h('div', { className: 'gl-pkg__actions' },
-          pending.length === 1 ? h(M.Button, { variant: 'filled', size: 'xs', icon: 'edit_note', onClick: function () { p.enter(pkg, pending[0].id); } }, 'Enter ' + (pending[0].vendor ? pending[0].vendor.name.split(' ')[0] : 'the') + ' quote') : null,
           h(M.Button, { variant: 'tonal', size: 'xs', icon: 'add', onClick: function () { p.enter(pkg, null); } }, 'Add quote'))),
       bestNote ? h(M.Banner, { tone: 'info', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { p.pick(pkg, pkg.best.id); } }, 'Use ' + pkg.best.vendor.name) }, bestNote) : null,
       h(M.DataGrid, { label: 'Quotes for ' + pkg.name, columns: cols, rows: rows, density: 'dense' }),
