@@ -13,6 +13,7 @@ import './app/app.css';
 import { supabase, cloudEnabled, displayName, initialsOf } from './lib/supabase.js';
 import { useLocalStore } from './app/store-local.js';
 import { useCloudStore } from './app/store-cloud.js';
+import { PrivacyPage, TermsPage } from './pages/legal.js';
 import { LoginPage, OnboardingPage, SettingsPage, createInvite } from './pages/auth.js';
 
 const h = R.createElement, useState = R.useState, useEffect = R.useEffect;
@@ -79,6 +80,8 @@ function Root() {
 
   async function signOut() { await supabase.auth.signOut(); navigate('/'); }
 
+  if (path === '/privacy') return h(PrivacyPage);
+  if (path === '/terms') return h(TermsPage);
   if (path === '/demo' || path.startsWith('/demo/')) return h(DemoApp);
   if (!cloudEnabled) {
     if (path.startsWith('/app')) return h(Centered, null, h('div', { className: 'gl-auth__card' }, h('h1', { className: 'headline-small' }, 'Not connected yet'), h('p', { className: 'body-medium' }, 'This build has no database configured (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY). The demo works without one.'), h(M.Button, { onClick: () => navigate('/demo') }, 'Open the demo')));
@@ -103,7 +106,8 @@ function Landing(p) {
       h('p', { className: 'body-large gl-dim' }, 'Crews, production rates and sub quotes in one sheet. Full undo. Checks that run as you type. A bid form and a budget export when you are done.'),
       h('div', { className: 'gl-auth__actions', style: { justifyContent: 'flex-start' } },
         p.demoOnly ? null : h(M.Button, { variant: 'filled', size: 'm', onClick: () => p.navigate('/app') }, 'Get started'),
-        h(M.Button, { variant: p.demoOnly ? 'filled' : 'tonal', size: 'm', icon: 'play_arrow', onClick: () => p.navigate('/demo') }, 'Try the demo'))));
+        h(M.Button, { variant: p.demoOnly ? 'filled' : 'tonal', size: 'm', icon: 'play_arrow', onClick: () => p.navigate('/demo') }, 'Try the demo')),
+      h('p', { className: 'body-small gl-dim' }, h('a', { href: '/privacy', className: 'gl-link' }, 'Privacy'), ' · ', h('a', { href: '/terms', className: 'gl-link' }, 'Terms'))));
 }
 
 createRoot(document.getElementById('root')).render(h(Root));

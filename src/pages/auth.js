@@ -116,7 +116,8 @@ export function LoginPage(p) {
           suggestion ? h('div', { className: 'gl-suggest body-medium' }, h('span', null, 'Did you mean ' + suggestion + '?'), h('button', { type: 'button', className: 'gl-link gl-linkbtn', onClick: () => { setEmail(suggestion); setSuggestion(null); } }, 'Yes, use that')) : null,
           h(M.Button, { variant: 'filled', size: 'm', disabled: busy, type: 'submit' }, busy ? 'Sending…' : 'Email me a code')),
         err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
-        h('p', { className: 'body-small gl-dim' }, 'Just looking? ', h('a', { href: '/demo', className: 'gl-link' }, 'Try the demo'), ', no account needed.'))));
+        h('p', { className: 'body-small gl-dim' }, 'Just looking? ', h('a', { href: '/demo', className: 'gl-link' }, 'Try the demo'), ', no account needed.'),
+        h('p', { className: 'body-small gl-dim' }, h('a', { href: '/privacy', className: 'gl-link' }, 'Privacy'), ' · ', h('a', { href: '/terms', className: 'gl-link' }, 'Terms')))));
 }
 
 /* ---------- First run: name, company, then straight into a sample bid ---------- */

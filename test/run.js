@@ -200,6 +200,12 @@ function makeXlsx() {
   await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(400);
   check((await page.locator('.gl-app').count()) === 1, 'demo state survives a reload');
 
+  // public policy pages Google needs
+  await page.goto('https://local.test/privacy', { waitUntil: 'load' }); await page.waitForTimeout(200);
+  check((await page.locator('h1').innerText()) === 'Privacy policy', 'privacy page opens without signing in');
+  await page.goto('https://local.test/terms', { waitUntil: 'load' }); await page.waitForTimeout(200);
+  check((await page.locator('h1').innerText()) === 'Terms of service', 'terms page opens without signing in');
+
   console.log(errors.length ? '\nFAILURES\n' + errors.join('\n') : '\nall good, no console errors');
   await browser.close();
   process.exit(errors.length ? 1 : 0);

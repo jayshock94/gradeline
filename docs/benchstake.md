@@ -73,6 +73,7 @@ Change a rate once and every crew and estimate that uses it reprices.
 - **First run:** a new person gives their name and company name, then lands in a sample bid they can change or delete.
 - **Companies:** every company's bids, estimates and library are private to that company.
 - **Roles:** owners manage the team and the company name, estimators can change anything in bids and estimates, and viewers can only look.
+- **Policies:** the privacy policy and terms are at /privacy and /terms. Support email is support@benchstake.com, an inbox in Resend.
 - **Invites:** an owner invites people with the Invite button or from Account › Company and team. An invite lasts 30 days, and only someone who signs in with that exact email can accept it. Invite emails go out from `api/send-invite.js`, which needs `RESEND_API_KEY` set in Vercel.
 
 ## Status
