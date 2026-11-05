@@ -5,10 +5,13 @@
 import { GL } from './gl.js';
 import { M3 as M } from '../ds/index.js';
 import * as R from 'react';
+import { createPortal } from 'react-dom';
 (function () {
   var h = R.createElement, useState = R.useState, useEffect = R.useEffect, useRef = R.useRef;
   var MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
+  // the app root carries the theme (data-theme) and the money mask, so layers go there, not in a dialog
+  function layerRoot() { return document.querySelector('.gl-app') || document.body; }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function touchScreen() { return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches; }
 
@@ -39,9 +42,10 @@ import * as R from 'react';
       document.addEventListener('keydown', onKey, true);
       return function () { document.removeEventListener('keydown', onKey, true); };
     }, []);
-    return h('div', { className: 'gl-picker-layer', role: 'presentation' },
+    // rendered at the page root: inside the dialog its scroll box and entrance animation clip and shift it
+    return createPortal(h('div', { className: 'gl-picker-layer', role: 'presentation' },
       h('div', { className: 'm3-scrim', onClick: p.onClose, 'aria-hidden': 'true' }),
-      h('div', { className: 'gl-picker', role: 'dialog', 'aria-modal': true, 'aria-label': p.label }, p.children));
+      h('div', { className: 'gl-picker', role: 'dialog', 'aria-modal': true, 'aria-label': p.label }, p.children)), layerRoot());
   }
 
   // DateField: label, value ('YYYY-MM-DD' or ''), onChange(iso | '' | null-on-garbage), supportingText, required, className, min
@@ -101,8 +105,8 @@ import * as R from 'react';
     var below = window.innerHeight - r.bottom > 300 || r.top < 300;
     var style = { position: 'fixed', zIndex: 45, left: Math.max(8, Math.min(r.left, window.innerWidth - 200)), width: Math.max(r.width, 180) };
     if (below) style.top = r.bottom + 4; else style.bottom = window.innerHeight - r.top + 4;
-    return h('div', { ref: ref, className: 'gl-timelist', role: 'listbox', 'aria-label': p.label, style: style },
-      p.times.map(function (t) { var sel = t === p.value; return h('button', { key: t, type: 'button', role: 'option', 'aria-selected': sel, className: 'gl-timelist__item' + (sel ? ' is-selected' : ''), onClick: function () { p.onPick(t); } }, sel ? h(M.Icon, { name: 'check', size: 18 }) : h('span', { className: 'gl-timelist__gap' }), t); }));
+    return createPortal(h('div', { ref: ref, className: 'gl-timelist', role: 'listbox', 'aria-label': p.label, style: style },
+      p.times.map(function (t) { var sel = t === p.value; return h('button', { key: t, type: 'button', role: 'option', 'aria-selected': sel, className: 'gl-timelist__item' + (sel ? ' is-selected' : ''), onClick: function () { p.onPick(t); } }, sel ? h(M.Icon, { name: 'check', size: 18 }) : h('span', { className: 'gl-timelist__gap' }), t); })), layerRoot());
   }
 
   // TimeField: label, value ('2:00 PM'), onChange(text), className. Every half hour from 6 AM to 6 PM, plus whatever is typed.

@@ -198,7 +198,8 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-picker-layer { position: fixed; inset: 0; z-index: 44; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .gl-picker-layer > .m3-scrim { position: absolute; z-index: 0; }
 .gl-picker { position: relative; z-index: 1; max-height: 100%; overflow: auto; }
-.gl-picker .m3-date { width: min(360px, calc(100vw - 32px)); }
+.gl-picker .m3-date { width: min(360px, calc(100vw - 32px)); box-sizing: border-box; }
+.gl-picker-layer { color: var(--on-surface); font-family: var(--font-plain); }
 .gl-picker .m3-date__grid { grid-template-columns: repeat(7, minmax(0, 48px)); }
 .gl-picker .m3-date__day { width: auto; max-width: 40px; aspect-ratio: 1; }
 .gl-timelist { display: flex; flex-direction: column; max-height: 288px; overflow: auto; padding: 8px 0; box-sizing: border-box; background: var(--surface-container); color: var(--on-surface); border-radius: var(--corner-extra-small); box-shadow: var(--elevation-2); }
