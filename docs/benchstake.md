@@ -54,6 +54,8 @@ Change a rate once and every crew and estimate that uses it reprices.
 - Crew plan for the superintendent and foremen, with the dollars hidden.
 - Budget export to QuickBooks Online (CSV), QuickBooks Desktop (IIF), Viewpoint Spectrum, Viewpoint Vista and Sage 300 CRE.
 
+**Settings.** One page under the account menu: company details for the bid form (address, phone, license number), the team and invites, bid defaults (overhead, profit, bond, material tax, target margin, usual bid time) that every new estimate starts from, the accounting export, and appearance (theme, field mode).
+
 **Made for the field and the office.** It works on a phone, a tablet or a laptop. Themes include light, dark and a high-contrast "sunlight" mode for outdoor tablets, plus a field mode that hides every dollar amount.
 
 ## How it compares with B2W Estimate
@@ -74,7 +76,7 @@ Change a rate once and every crew and estimate that uses it reprices.
 - **Companies:** every company's bids, estimates and library are private to that company.
 - **Roles:** owners manage the team and the company name, estimators can change anything in bids and estimates, and viewers can only look.
 - **Policies:** the privacy policy and terms are at /privacy and /terms. Support email is support@benchstake.com, an inbox in Resend.
-- **Invites:** an owner invites people with the Invite button or from Account › Company and team. An invite lasts 30 days, and only someone who signs in with that exact email can accept it. Invite emails go out from `api/send-invite.js`, which needs `RESEND_API_KEY` set in Vercel.
+- **Invites:** an owner invites people with the Invite button or from Account › Settings › Team. An invite lasts 30 days, and only someone who signs in with that exact email can accept it. Invite emails go out from `api/send-invite.js`, which needs `RESEND_API_KEY` set in Vercel.
 
 ## Status
 

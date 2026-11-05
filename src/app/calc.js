@@ -17,7 +17,7 @@ import { M3 } from '../ds/index.js';
     return { laborPerDay: laborH * hours, equipPerDay: equipH * hours, perDay: (laborH + equipH) * hours, people: people, hours: hours, laborPerHour: laborH, equipPerHour: equipH };
   };
 
-  GL.blankEstimate = function () { return { items: [], tasks: [], packages: [], markup: { overhead: 6, profit: 4, bond: 1.2, tax: 0 }, targetMargin: 9, locks: {} }; };
+  GL.blankEstimate = function (defaults) { var d = defaults || {}; var n = function (v, f) { return v == null || isNaN(v) ? f : Number(v); }; return { items: [], tasks: [], packages: [], markup: { overhead: n(d.overhead, 6), profit: n(d.profit, 4), bond: n(d.bond, 1.2), tax: n(d.tax, 0) }, targetMargin: n(d.targetMargin, 9), locks: {} }; };
   GL.derive = function (doc, bidId) {
     var est = doc.estimates[bidId || doc.currentBidId] || GL.blankEstimate(), lib = doc.library;
     var items = est.items, tasks = est.tasks, pkgs = est.packages;

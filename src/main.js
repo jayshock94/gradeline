@@ -6,6 +6,7 @@ import { GL } from './app/gl.js';
 import './app/data.js';
 import './app/calc.js';
 import './app/core.js';
+import './app/fields.js';
 import './app/estimate.js';
 import './app/screens.js';
 import './lib/spreadsheet.js';
@@ -14,7 +15,7 @@ import { supabase, cloudEnabled, displayName, initialsOf } from './lib/supabase.
 import { useLocalStore } from './app/store-local.js';
 import { useCloudStore } from './app/store-cloud.js';
 import { PrivacyPage, TermsPage } from './pages/legal.js';
-import { LoginPage, OnboardingPage, SettingsPage, createInvite } from './pages/auth.js';
+import { LoginPage, OnboardingPage, CompanyNamePanel, TeamPanel, createInvite } from './pages/auth.js';
 
 const h = R.createElement, useState = R.useState, useEffect = R.useEffect;
 
@@ -34,11 +35,12 @@ function DemoApp() {
 
 function CloudApp(p) {
   const { user, org, name } = p;
-  const store = useCloudStore({ supabase, orgId: org.id, user, name, initialUi: p.firstBid ? { screen: 'estimate', tab: 'sheet', bidId: p.firstBid } : null });
+  const store = useCloudStore({ supabase, orgId: org.id, user, name, initialUi: p.firstBid ? { screen: 'estimate', tab: 'sheet', bidId: p.firstBid } : p.settings ? { screen: 'settings' } : null });
   if (store.error && !store.doc) return h(Centered, null, h(M.Banner, { tone: 'error', headline: 'Could not load your company' }, store.error));
   if (!store.loaded || !store.doc) return h(Centered, null, h(M.LoadingIndicator, { label: 'Loading your bids' }));
   return h(R.Fragment, null,
-    h(GL.App, { store, session: { name, initials: initialsOf(name, user.email), orgName: org.name, role: org.role, onSignOut: p.onSignOut, onSettings: p.onSettings, peers: store.peers, joined: p.joined, onDismissJoined: p.onDismissJoined, onInvite: org.role === 'owner' ? (email, role) => createInvite(supabase, org, user, email, role) : null } }),
+    h(GL.App, { store, session: { name, initials: initialsOf(name, user.email), orgName: org.name, role: org.role, onSignOut: p.onSignOut, peers: store.peers, email: user.email,
+      companyPanel: h(CompanyNamePanel, { supabase, org, onOrgChanged: p.onOrgChanged }), teamPanel: h(TeamPanel, { supabase, org, user }), joined: p.joined, onDismissJoined: p.onDismissJoined, onInvite: org.role === 'owner' ? (email, role) => createInvite(supabase, org, user, email, role) : null } }),
     store.error ? h('div', { className: 'gl-snack' }, h(M.Snackbar, { message: store.error, onClose: store.api.clearError })) : null);
 }
 
@@ -94,8 +96,7 @@ function Root() {
   if (org === undefined) return h(Centered, null, h(M.LoadingIndicator, { label: 'Finding your company' }));
   if (org === null) return h(OnboardingPage, { supabase, user, email: user.email, onSignOut: signOut, onCreated: (id, name, bidId) => { setFirstBid(bidId); setOrg({ id, name: name || 'Your company', role: 'owner' }); } });
   const name = displayName(user);
-  if (path === '/app/settings') return h(SettingsPage, { supabase, org, user, name, onBack: () => navigate('/app'), onSignOut: signOut, onOrgChanged: setOrg });
-  return h(CloudApp, { user, org, name, firstBid, joined, onDismissJoined: () => setJoined(false), onSignOut: signOut, onSettings: () => navigate('/app/settings') });
+  return h(CloudApp, { user, org, name, firstBid, joined, settings: path === '/app/settings', onDismissJoined: () => setJoined(false), onSignOut: signOut, onOrgChanged: setOrg });
 }
 
 function Landing(p) {

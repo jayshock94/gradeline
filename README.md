@@ -11,7 +11,7 @@ Built on the Gradeline design system (the design system artifact keeps that name
 | Folder | What |
 |---|---|
 | `src/app/` | The app: data model (`calc.js`), screens, the estimate workspace, the two stores (`store-local.js` for the demo, `store-cloud.js` for signed-in companies) |
-| `src/pages/` | Sign-in, first-run company setup, company and team settings |
+| `src/pages/` | Sign-in, first-run company setup, and the company-name and team panels the Settings screen embeds |
 | `src/ds/` | The design system runtime (tokens, components), vendored from the Gradeline design system |
 | `supabase/migrations/` | The database: tables, security rules, live updates, onboarding and save functions |
 | `test/run.js` | End-to-end check of the production build in demo mode |
@@ -51,7 +51,7 @@ npm run build && npm test   # production build + headless browser checks
 
 ### 3. First sign-in
 
-Open the site, **Sign in**, give your name and company name, and you land in a sample bid, then **Account › Company and team** to invite people by email. An invited person signs in with that same email and lands in your company.
+Open the site, **Sign in**, give your name and company name, and you land in a sample bid, then **Account › Settings › Team** to invite people by email. An invited person signs in with that same email and lands in your company.
 
 ## Roles
 

@@ -221,15 +221,29 @@ export async function createInvite(supabase, org, user, address, role) {
   return { email, emailed };
 }
 
-/* ---------- Company and team settings ---------- */
-export function SettingsPage(p) {
+/* ---------- Company name and team panels (cloud only; the Settings screen in the app embeds them) ---------- */
+export function CompanyNamePanel(p) {
+  const { supabase, org } = p;
+  const [orgName, setOrgName] = useState(org.name);
+  const [msg, setMsg] = useState(null);
+  const [err, setErr] = useState(null);
+  const isOwner = org.role === 'owner';
+  async function rename() { setErr(null); const { error } = await supabase.from('organizations').update({ name: orgName.trim() }).eq('id', org.id); if (error) setErr(error.message); else { setMsg('Company renamed.'); p.onOrgChanged && p.onOrgChanged({ ...org, name: orgName.trim() }); } }
+  return h(Frag, null,
+    h('div', { className: 'm3-row', style: { gap: 12, alignItems: 'flex-start' } },
+      h(M.TextField, { variant: 'outlined', label: 'Company name', value: orgName, onChange: setOrgName, disabled: !isOwner, className: 'gl-field', supportingText: isOwner ? 'On the bid form and every export.' : 'Only an owner can rename the company.' }),
+      isOwner ? h(M.Button, { variant: 'tonal', onClick: rename, disabled: !orgName.trim() || orgName.trim() === org.name, style: { marginTop: 8 } }, 'Rename') : null),
+    msg ? h(M.Banner, { tone: 'success', compact: true, onClose: () => setMsg(null) }, msg) : null,
+    err ? h(M.Banner, { tone: 'error', compact: true, onClose: () => setErr(null) }, err) : null);
+}
+
+export function TeamPanel(p) {
   const { supabase, org, user } = p;
   const [members, setMembers] = useState([]);
   const [invites, setInvites] = useState([]);
   const [profiles, setProfiles] = useState({});
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('estimator');
-  const [orgName, setOrgName] = useState(org.name);
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
   const me = members.find(m => m.user_id === user.id);
@@ -261,33 +275,21 @@ export function SettingsPage(p) {
   async function cancelInvite(id) { const { error } = await supabase.from('invites').delete().eq('id', id); if (error) setErr(error.message); load(); }
   async function remove(userId) { const { error } = await supabase.from('memberships').delete().eq('org_id', org.id).eq('user_id', userId); if (error) setErr(error.message); load(); }
   async function setMemberRole(userId, r) { const { error } = await supabase.from('memberships').update({ role: r }).eq('org_id', org.id).eq('user_id', userId); if (error) setErr(error.message); load(); }
-  async function rename() { const { error } = await supabase.from('organizations').update({ name: orgName.trim() }).eq('id', org.id); if (error) setErr(error.message); else { setMsg('Company renamed.'); p.onOrgChanged && p.onOrgChanged({ ...org, name: orgName.trim() }); } }
 
   const roleOpts = [{ value: 'owner', label: 'Owner' }, { value: 'estimator', label: 'Estimator' }, { value: 'viewer', label: 'Viewer (read only)' }];
-  return h('div', { className: 'gl-screen gl-settings' },
-    h('div', { className: 'gl-settings__head' },
-      h(M.IconButton, { icon: 'arrow_back', label: 'Back to the app', onClick: p.onBack }),
-      h('h1', { className: 'headline-small', style: { margin: 0 } }, 'Company and team')),
-    h(GL.Section, { title: 'Company' },
-      h('div', { className: 'm3-row', style: { gap: 12, alignItems: 'flex-start' } },
-        h(M.TextField, { variant: 'outlined', label: 'Company name', value: orgName, onChange: setOrgName, disabled: !isOwner, className: 'gl-field' }),
-        isOwner ? h(M.Button, { variant: 'tonal', onClick: rename, disabled: !orgName.trim() || orgName.trim() === org.name, style: { marginTop: 8 } }, 'Rename') : null)),
-    h(GL.Section, { title: 'People', subtitle: 'Owners manage the team and billing. Estimators change anything. Viewers can look but not change.' },
-      h(M.DataGrid, { label: 'Team', density: 'standard', rows: members.map(m => ({ id: m.user_id, name: (profiles[m.user_id] && (profiles[m.user_id].display_name || profiles[m.user_id].email)) || (m.user_id === user.id ? 'You' : 'Member'), email: profiles[m.user_id] ? profiles[m.user_id].email : '', role: m.role, me: m.user_id === user.id })), columns: [
-        { key: 'name', header: 'Name', width: 220, render: r => h('span', null, r.name, r.me ? h('span', { className: 'gl-dim' }, ' (you)') : null) },
-        { key: 'email', header: 'Email', width: 260 },
-        { key: 'role', header: 'Role', width: 200, render: r => isOwner && !r.me ? h(GL.Select, { value: r.role, options: roleOpts, onChange: v => setMemberRole(r.id, v), className: 'gl-select--dense' }) : roleOpts.find(o => o.value === r.role).label },
-        { key: 'actions', header: '', width: 60, align: 'center', render: r => isOwner && !r.me ? h(M.IconButton, { icon: 'person_remove', label: 'Remove ' + r.name, size: 'xs', onClick: () => remove(r.id) }) : '' }] }),
-      isOwner ? h('form', { onSubmit: invite, className: 'gl-invite' },
-        h(M.TextField, { variant: 'outlined', label: 'Invite by email', type: 'email', value: email, onChange: setEmail, className: 'gl-field', placeholder: 'name@company.com' }),
-        h(GL.Select, { label: 'Role', value: role, options: roleOpts, onChange: setRole }),
-        h(M.Button, { variant: 'filled', icon: 'person_add', type: 'submit', style: { marginTop: 20 } }, 'Invite')) : null,
-      invites.length ? h('div', { className: 'gl-invites' },
-        h('div', { className: 'label-medium gl-dim' }, 'Invited, not signed in yet'),
-        invites.map(i => h('div', { key: i.id, className: 'gl-invites__row body-medium' }, h('span', null, i.email), h(M.StatusChip, { status: 'pending', label: roleOpts.find(o => o.value === i.role).label }), isOwner ? h(M.IconButton, { icon: 'send', label: 'Send invite again', size: 'xs', onClick: () => resendInvite(i.id, i.email) }) : null, isOwner ? h(M.IconButton, { icon: 'close', label: 'Cancel invite', size: 'xs', onClick: () => cancelInvite(i.id) }) : null))) : null,
-      msg ? h(M.Banner, { tone: 'success', compact: true, onClose: () => setMsg(null) }, msg) : null,
-      err ? h(M.Banner, { tone: 'error', compact: true, onClose: () => setErr(null) }, err) : null),
-    h(GL.Section, { title: 'You' },
-      h('div', { className: 'body-medium' }, h('span', { className: 'm3-avatar gl-avatar', style: { marginRight: 8, verticalAlign: 'middle' } }, initialsOf(p.name, user.email)), p.name, h('span', { className: 'gl-dim' }, ' · ' + user.email)),
-      h(M.Button, { variant: 'outlined', icon: 'logout', onClick: p.onSignOut }, 'Sign out')));
+  return h(Frag, null,
+    h(M.DataGrid, { label: 'Team', density: 'standard', rows: members.map(m => ({ id: m.user_id, name: (profiles[m.user_id] && (profiles[m.user_id].display_name || profiles[m.user_id].email)) || (m.user_id === user.id ? 'You' : 'Member'), email: profiles[m.user_id] ? profiles[m.user_id].email : '', role: m.role, me: m.user_id === user.id })), columns: [
+      { key: 'name', header: 'Name', width: 220, render: r => h('span', null, r.name, r.me ? h('span', { className: 'gl-dim' }, ' (you)') : null) },
+      { key: 'email', header: 'Email', width: 260 },
+      { key: 'role', header: 'Role', width: 200, render: r => isOwner && !r.me ? h(GL.Select, { value: r.role, options: roleOpts, onChange: v => setMemberRole(r.id, v), className: 'gl-select--dense' }) : roleOpts.find(o => o.value === r.role).label },
+      { key: 'actions', header: '', width: 60, align: 'center', render: r => isOwner && !r.me ? h(M.IconButton, { icon: 'person_remove', label: 'Remove ' + r.name, size: 'xs', onClick: () => remove(r.id) }) : '' }], emptyText: 'Loading the team…' }),
+    isOwner ? h('form', { onSubmit: invite, className: 'gl-invite' },
+      h(M.TextField, { variant: 'outlined', label: 'Invite by email', type: 'email', value: email, onChange: setEmail, className: 'gl-field', placeholder: 'name@company.com' }),
+      h(GL.Select, { label: 'Role', value: role, options: roleOpts, onChange: setRole }),
+      h(M.Button, { variant: 'filled', icon: 'person_add', type: 'submit', style: { marginTop: 20 } }, 'Invite')) : null,
+    invites.length ? h('div', { className: 'gl-invites' },
+      h('div', { className: 'label-medium gl-dim' }, 'Invited, not signed in yet'),
+      invites.map(i => h('div', { key: i.id, className: 'gl-invites__row body-medium' }, h('span', null, i.email), h(M.StatusChip, { status: 'pending', label: roleOpts.find(o => o.value === i.role).label }), isOwner ? h(M.IconButton, { icon: 'send', label: 'Send invite again', size: 'xs', onClick: () => resendInvite(i.id, i.email) }) : null, isOwner ? h(M.IconButton, { icon: 'close', label: 'Cancel invite', size: 'xs', onClick: () => cancelInvite(i.id) }) : null))) : null,
+    msg ? h(M.Banner, { tone: 'success', compact: true, onClose: () => setMsg(null) }, msg) : null,
+    err ? h(M.Banner, { tone: 'error', compact: true, onClose: () => setErr(null) }, err) : null);
 }
