@@ -42,5 +42,19 @@ check(/\$41,000/.test(lump.say), 'enter_quote accepts a lump sum');
 threw = null; try { ops.findBid(doc, 'zzz'); } catch (e) { threw = e.message; }
 check(/No bid matches/.test(threw || ''), 'a bad bid name is a clear error');
 
+// tasks give an item its cost
+const sw = ops.createBid(doc, { name: 'Sewer test', owner: 'City', due: '2026-11-19' }, 'Jay');
+ops.addPayItems(doc, { bid: sw.id, items: [{ code: '1', name: '8 in sewer line', qty: 1756, unit: 'LF' }] });
+const other = ops.addTask(doc, { bid: sw.id, item: '1', type: 'other', name: 'Sewer line, all in', cost_per_unit: 5.45 });
+const ds = GL.derive(doc, sw.id);
+check(Math.abs(ds.totals.direct - 9570.2) < 0.01 && ds.totals.bidTotal > ds.totals.direct, 'add_task other at $5.45/LF costs $9,570.20 and prices the item: ' + other.say);
+const crewName = doc.library.crews[0].name;
+ops.addTask(doc, { bid: sw.id, item: '1', type: 'crew', crew: crewName.slice(0, 6), production: 300 });
+check(doc.estimates[sw.id].tasks.length === 2, 'add_task crew finds the crew by part of its name');
+threw = null; try { ops.addTask(doc, { bid: sw.id, item: '1', type: 'sub' }); } catch (e) { threw = e.message; }
+check(/plug price/.test(threw || ''), 'a sub task without a plug or package is refused');
+ops.removeTask(doc, { bid: sw.id, item: '1', task: crewName });
+check(doc.estimates[sw.id].tasks.length === 1, 'remove_task removes it');
+
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall good');
 process.exit(fails ? 1 : 0);

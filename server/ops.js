@@ -189,3 +189,46 @@ export function setMarkup(draft, a) {
   const d = GL.derive(draft, bid.id);
   return { entry: { title: 'Changed markup on ' + bid.name.split(',')[0], detail: changes.join(', '), icon: 'tune' }, say: 'Markup on "' + bid.name + '": ' + changes.join(', ') + '. Bid total is now ' + money(d.totals.bidTotal) + ' at ' + d.totals.margin.toFixed(1) + '% margin.' };
 }
+
+// A task is how a pay item gets its cost: a crew at a production rate, a material, a sub (plug or quote package), or other cost.
+function findCrew(lib, ref) { const q = norm(ref); const c = lib.crews.find(x => x.id === ref || norm(x.name) === q) || lib.crews.find(x => norm(x.name).includes(q)); if (!c) throw new Error('No crew matches "' + ref + '". Crews: ' + (lib.crews.map(x => x.name).join('; ') || 'none yet')); return c; }
+function findMaterial(lib, ref) { const q = norm(ref); const m = lib.materials.find(x => x.id === ref || norm(x.name) === q) || lib.materials.find(x => norm(x.name).includes(q)); if (!m) throw new Error('No material matches "' + ref + '". Materials: ' + (lib.materials.map(x => x.name).join('; ') || 'none yet')); return m; }
+
+export function addTask(draft, a) {
+  const bid = findBid(draft, a.bid), est = estimateOf(draft, bid), it = findItem(est, a.item);
+  const type = a.type;
+  const t = { id: uid('T'), itemId: it.id, name: String(a.name || '').trim(), type };
+  let what;
+  if (type === 'crew') {
+    const c = findCrew(draft.library, needs(a.crew, 'crew'));
+    const prod = num(a.production, 'production'); if (!(prod > 0)) throw new Error('production is ' + it.unit + ' per day and must be above 0.');
+    t.crewId = c.id; t.production = prod; if (!t.name) t.name = c.name; what = c.name + ' at ' + GL.fmtNum(prod) + ' ' + it.unit + '/day';
+  } else if (type === 'material') {
+    const m = findMaterial(draft.library, needs(a.material, 'material'));
+    t.matId = m.id; t.per = a.per == null || a.per === '' ? 1 : num(a.per, 'per'); if (!t.name) t.name = m.name; what = m.name + ', ' + t.per + ' ' + m.unit + ' per ' + it.unit;
+  } else if (type === 'sub') {
+    t.packageId = a.package ? findPackage(est, a.package).id : null;
+    t.plug = a.plug == null || a.plug === '' ? null : num(a.plug, 'plug');
+    if (!t.packageId && t.plug == null) throw new Error('A sub task needs a plug price per ' + it.unit + ' or a quote package.');
+    if (!t.name) t.name = 'Subcontract'; what = (t.plug != null ? 'plug ' + money(t.plug, 2) + ' / ' + it.unit : '') + (t.packageId ? (t.plug != null ? ', ' : '') + 'package ' + est.packages.find(p => p.id === t.packageId).name : '');
+  } else if (type === 'other') {
+    if (a.lump_sum != null && a.lump_sum !== '') { t.amount = num(a.lump_sum, 'lump_sum'); what = money(t.amount) + ' lump sum'; }
+    else { t.perUnit = num(a.cost_per_unit, 'cost_per_unit'); what = money(t.perUnit, 2) + ' / ' + it.unit; }
+    if (!t.name) t.name = 'Other cost';
+  } else throw new Error('type must be crew, material, sub or other.');
+  est.tasks.push(t);
+  const d = GL.derive(draft, bid.id), di = d.items.find(x => x.id === it.id);
+  return { entry: { title: 'Added task ' + t.name + ' to ' + (it.code || it.name), detail: what, icon: 'add_task' },
+    say: 'Added "' + t.name + '" (' + what + ') to ' + (it.code ? it.code + ' ' : '') + it.name + '. Item cost ' + money(di.direct) + ', priced at ' + money(di.unitPrice, 2) + ' / ' + it.unit + '. Bid total ' + money(d.totals.bidTotal) + ' at ' + d.totals.margin.toFixed(1) + '% margin.' };
+}
+
+export function removeTask(draft, a) {
+  const bid = findBid(draft, a.bid), est = estimateOf(draft, bid), it = findItem(est, a.item);
+  const mine = est.tasks.filter(t => t.itemId === it.id);
+  const q = norm(a.task);
+  const hits = mine.filter(t => t.id === a.task || norm(t.name) === q).length ? mine.filter(t => t.id === a.task || norm(t.name) === q) : mine.filter(t => norm(t.name).includes(q));
+  if (!hits.length) throw new Error('No task on ' + (it.code || it.name) + ' matches "' + a.task + '". Tasks: ' + (mine.map(t => t.name).join('; ') || 'none'));
+  if (hits.length > 1) throw new Error('"' + a.task + '" matches ' + hits.length + ' tasks; be more specific.');
+  est.tasks = est.tasks.filter(t => t !== hits[0]);
+  return { entry: { title: 'Deleted task ' + hits[0].name, detail: it.code || it.name, icon: 'delete' }, say: 'Removed "' + hits[0].name + '" from ' + (it.code || it.name) + '.' };
+}

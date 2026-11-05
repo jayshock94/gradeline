@@ -31,7 +31,7 @@ const call = async (method, params, id = 1) => { const rr = res(); await mcp({ m
 r = await call('initialize', { protocolVersion: '2025-06-18' });
 check(r.code === 200 && r.body.result.protocolVersion === '2025-06-18' && /Maya R\. at Cascade Civil/.test(r.body.result.instructions), 'initialize answers with the protocol version and who is signed in');
 r = await call('tools/list', {});
-check(r.code === 200 && r.body.result.tools.length === 11 && r.body.result.tools.every(t => t.inputSchema), 'tools/list lists 11 tools with schemas');
+check(r.code === 200 && r.body.result.tools.length === 13 && r.body.result.tools.every(t => t.inputSchema), 'tools/list lists 13 tools with schemas');
 r = res(); await mcp({ method: 'POST', headers: { authorization: 'Bearer tok' }, body: { jsonrpc: '2.0', method: 'notifications/initialized' } }, r);
 check(r.code === 202, 'a notification gets 202 and no body');
 r = await call('tools/call', { name: 'nope', arguments: {} });
