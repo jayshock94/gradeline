@@ -140,7 +140,7 @@ import * as R from 'react';
       api.update(function (doc) { var e = doc.estimates[doc.currentBidId]; var pk = e.packages.find(function (x) { return x.id === pkg.id; }); pk.selectedQuoteId = quoteId; },
         { title: quoteId === 'self' ? 'Chose self-perform for ' + pkg.name : quoteId ? 'Accepted ' + (q.vendor ? q.vendor.name : 'a quote') + ' for ' + pkg.name : 'Cleared the pick for ' + pkg.name, detail: quoteId === 'self' ? GL.fmtMoney(pkg.selfTotal) : q && q.total != null ? GL.fmtMoney(q.total) : 'back to plug', icon: 'request_quote' });
     }
-    function enter(pkg, quoteId) { p.openDialog({ kind: 'quote', packageId: pkg.id, quoteId: quoteId || null }); }
+    function enter(pkg, quoteId, read) { p.openDialog({ kind: 'quote', packageId: pkg.id, quoteId: quoteId || null, read: read || null }); }
     // The same numbers the tab badge and the tiles show, so each one can open exactly the packages it counts
     var waiting = d.packages.filter(function (x) { return x.quotes.some(function (q) { return q.status === 'pending'; }); });
     var unpicked = d.packages.filter(function (x) { return !x.selected && !x.selfSelected; });
@@ -202,6 +202,7 @@ import * as R from 'react';
             picked ? null : h(M.StatusChip, { status: 'info', icon: 'radio_button_unchecked', label: 'On plug, nothing picked' })),
           h('div', { className: 'gl-pkg__meta body-small' }, received.length + ' of ' + pkg.quotes.length + ' quote' + (pkg.quotes.length === 1 ? '' : 's') + ' in' + (pkg.best ? ' · low ' + pkg.best.vendor.name + ' ' + GL.fmtMoney(pkg.best.total) : '') + (picked ? ' · using ' + picked : '') + (pkg.sentAt ? ' · started ' + GL.fmtDate(pkg.sentAt) : ''))),
         h('div', { className: 'gl-pkg__actions' },
+          h('label', { className: 'm3-btn m3-btn--outlined m3-btn--xs m3-btn--round gl-filebtn', title: 'Read a quote from a PDF or a photo' }, h(M.Icon, { name: 'document_scanner', size: 18 }), ' Quote from file', h('input', { type: 'file', accept: '.pdf,image/*', 'aria-label': 'Read a quote for ' + pkg.name + ' from a PDF or photo', onChange: function (e) { var file = e.target.files && e.target.files[0]; e.target.value = ''; if (file) p.enter(pkg, null, { file: file }); }, style: { position: 'absolute', opacity: 0, width: 1, height: 1 } })),
           h(M.Button, { variant: 'tonal', size: 'xs', icon: 'add', onClick: function () { p.enter(pkg, null); } }, 'Add quote'))),
       bestNote ? h(M.Banner, { tone: 'info', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { p.pick(pkg, pkg.best.id); } }, 'Use ' + pkg.best.vendor.name) }, bestNote) : null,
       h(M.DataGrid, { label: 'Quotes for ' + pkg.name, columns: cols, rows: rows, density: 'dense' }),

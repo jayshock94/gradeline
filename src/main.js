@@ -7,6 +7,7 @@ import './app/data.js';
 import './app/calc.js';
 import './app/core.js';
 import './app/fields.js';
+import './app/ai.js';
 import './app/estimate.js';
 import './app/screens.js';
 import './lib/spreadsheet.js';
@@ -15,7 +16,7 @@ import { supabase, cloudEnabled, displayName, initialsOf } from './lib/supabase.
 import { useLocalStore } from './app/store-local.js';
 import { useCloudStore } from './app/store-cloud.js';
 import { PrivacyPage, TermsPage } from './pages/legal.js';
-import { LoginPage, OnboardingPage, CompanyNamePanel, TeamPanel, createInvite } from './pages/auth.js';
+import { LoginPage, OnboardingPage, CompanyNamePanel, TeamPanel, ConsentPage, ConnectedAiPanel, createInvite } from './pages/auth.js';
 
 const h = R.createElement, useState = R.useState, useEffect = R.useEffect;
 
@@ -40,7 +41,7 @@ function CloudApp(p) {
   if (!store.loaded || !store.doc) return h(Centered, null, h(M.LoadingIndicator, { label: 'Loading your bids' }));
   return h(R.Fragment, null,
     h(GL.App, { store, session: { name, initials: initialsOf(name, user.email), orgName: org.name, role: org.role, onSignOut: p.onSignOut, peers: store.peers, email: user.email,
-      companyPanel: h(CompanyNamePanel, { supabase, org, onOrgChanged: p.onOrgChanged }), teamPanel: h(TeamPanel, { supabase, org, user }), joined: p.joined, onDismissJoined: p.onDismissJoined, onInvite: org.role === 'owner' ? (email, role) => createInvite(supabase, org, user, email, role) : null } }),
+      companyPanel: h(CompanyNamePanel, { supabase, org, onOrgChanged: p.onOrgChanged }), teamPanel: h(TeamPanel, { supabase, org, user }), aiPanel: h(ConnectedAiPanel, { supabase }), getToken: async () => { const { data } = await supabase.auth.getSession(); return data.session ? data.session.access_token : null; }, joined: p.joined, onDismissJoined: p.onDismissJoined, onInvite: org.role === 'owner' ? (email, role) => createInvite(supabase, org, user, email, role) : null } }),
     store.error ? h('div', { className: 'gl-snack' }, h(M.Snackbar, { message: store.error, onClose: store.api.clearError })) : null);
 }
 
@@ -89,13 +90,15 @@ function Root() {
     if (path.startsWith('/app')) return h(Centered, null, h('div', { className: 'gl-auth__card' }, h('h1', { className: 'headline-small' }, 'Not connected yet'), h('p', { className: 'body-medium' }, 'This build has no database configured (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY). The demo works without one.'), h(M.Button, { onClick: () => navigate('/demo') }, 'Open the demo')));
     return h(Landing, { navigate, demoOnly: true });
   }
+  const consent = path === '/oauth/consent'; // an AI app asking to connect (see pages/auth.js ConsentPage)
   if (!auth.ready) return h(Centered, null, h(M.LoadingIndicator, { label: 'Signing in' }));
-  if (!user) return path.startsWith('/app') ? h(LoginPage, { supabase }) : h(Landing, { navigate });
-  if (!path.startsWith('/app')) return h(Redirect, { to: '/app', navigate });
+  if (!user) return path.startsWith('/app') || consent ? h(LoginPage, { supabase }) : h(Landing, { navigate });
+  if (!path.startsWith('/app') && !consent) return h(Redirect, { to: '/app', navigate });
   if (orgError) return h(Centered, null, h('div', { className: 'gl-auth__card' }, h(M.Banner, { tone: 'error', headline: 'Could not reach your company' }, orgError), h('div', { className: 'gl-auth__actions' }, h(M.Button, { variant: 'text', onClick: signOut }, 'Sign out'), h(M.Button, { onClick: () => setRetry(r => r + 1) }, 'Try again'))));
   if (org === undefined) return h(Centered, null, h(M.LoadingIndicator, { label: 'Finding your company' }));
   if (org === null) return h(OnboardingPage, { supabase, user, email: user.email, onSignOut: signOut, onCreated: (id, name, bidId) => { setFirstBid(bidId); setOrg({ id, name: name || 'Your company', role: 'owner' }); } });
   const name = displayName(user);
+  if (consent) return h(ConsentPage, { supabase, org, user, name, onSignOut: signOut });
   return h(CloudApp, { user, org, name, firstBid, joined, settings: path === '/app/settings', onDismissJoined: () => setJoined(false), onSignOut: signOut, onOrgChanged: setOrg });
 }
 

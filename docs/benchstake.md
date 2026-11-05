@@ -56,6 +56,11 @@ Change a rate once and every crew and estimate that uses it reprices.
 
 **Settings.** One page under the account menu: company details for the bid form (address, phone, license number), the team and invites, bid defaults (overhead, profit, bond, material tax, target margin, usual bid time) that every new estimate starts from, the accounting export, and appearance (theme, field mode).
 
+**AI, two ways.**
+
+- *Quote from file:* on any quote package, read a sub's PDF, photo or pasted email straight into the quote dialog. The AI reads the document and matches lines to the pay items; the estimator checks the numbers and taps Save. Unmatched lines and exclusions go into the notes; a quoted quantity that differs from the bid quantity is flagged on the line. The AI never prices anything.
+- *Connect your own AI:* benchstake.com/api/mcp is an MCP server. Add it to Claude, ChatGPT or any MCP app as a custom connector (Settings › Connected AI shows the three steps), sign in with the Benchstake account, and the AI can list bids, read an estimate, add pay items, enter and pick quotes, lock prices and set markup, as that person, with their role. Every change shows in the history with their name and can be undone. Disconnect any time from Settings.
+
 **Made for the field and the office.** It works on a phone, a tablet or a laptop. Themes include light, dark and a high-contrast "sunlight" mode for outdoor tablets, plus a field mode that hides every dollar amount.
 
 ## How it compares with B2W Estimate
@@ -82,6 +87,7 @@ Change a rate once and every crew and estimate that uses it reprices.
 
 - Live on benchstake.com with the first company set up.
 - Tested end to end with two people editing one estimate at once, plus automated checks on every change to the code.
+- Quote from file needs `ANTHROPIC_API_KEY` in Vercel; the MCP connector needs the OAuth server switched on in Supabase (Authentication › OAuth Server, path `/oauth/consent`, dynamic client registration on).
 - Not built yet: DOT (state transportation department) bid formats, sending quote requests to subs by email, a full keyboard-driven spreadsheet grid, and per-cost-type markup.
 
 ## Behind the scenes
@@ -89,5 +95,6 @@ Change a rate once and every crew and estimate that uses it reprices.
 - **App:** React, hosted on Vercel.
 - **Database and sign-in:** Supabase.
 - **Sign-in emails:** Resend, sent from no-reply@benchstake.com.
+- **AI:** Anthropic API for reading quotes (`api/read-quote.js`); the MCP server is `api/mcp.js` with its operations in `server/ops.js`, signed in through Supabase's OAuth 2.1 server.
 - **Code:** github.com/jayshock94/gradeline. The repo keeps the old working name, Gradeline.
 - **Design:** the Gradeline design system, built on Material 3 with colors for each cost type (labor blue, equipment orange, material teal, sub violet).

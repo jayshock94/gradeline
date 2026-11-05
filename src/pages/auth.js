@@ -76,7 +76,8 @@ export function LoginPage(p) {
   const [err, setErr] = useState(null);
   const [suggestion, setSuggestion] = useState(null);
   const [wait, setWait] = useState(0);
-  const redirect = window.location.origin + '/app';
+  // after a Google or Microsoft sign-in, come back to the consent page if that is where we started
+  const redirect = window.location.origin + (window.location.pathname.startsWith('/oauth/') ? window.location.pathname + window.location.search : '/app');
   // Google and Microsoft buttons show only when they are switched on in Supabase (Authentication › Providers)
   const [providers, setProviders] = useState({ google: false, azure: false });
   useEffect(() => {
@@ -291,5 +292,71 @@ export function TeamPanel(p) {
       h('div', { className: 'label-medium gl-dim' }, 'Invited, not signed in yet'),
       invites.map(i => h('div', { key: i.id, className: 'gl-invites__row body-medium' }, h('span', null, i.email), h(M.StatusChip, { status: 'pending', label: roleOpts.find(o => o.value === i.role).label }), isOwner ? h(M.IconButton, { icon: 'send', label: 'Send invite again', size: 'xs', onClick: () => resendInvite(i.id, i.email) }) : null, isOwner ? h(M.IconButton, { icon: 'close', label: 'Cancel invite', size: 'xs', onClick: () => cancelInvite(i.id) }) : null))) : null,
     msg ? h(M.Banner, { tone: 'success', compact: true, onClose: () => setMsg(null) }, msg) : null,
+    err ? h(M.Banner, { tone: 'error', compact: true, onClose: () => setErr(null) }, err) : null);
+}
+
+/* ---------- OAuth consent: an AI tool (Claude, ChatGPT…) asks to act as this person ---------- */
+export function ConsentPage(p) {
+  const { supabase, org, user } = p;
+  const id = new URLSearchParams(window.location.search).get('authorization_id');
+  const [details, setDetails] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!id) { setErr('This link is missing its authorization id. Start the connection again from your AI app.'); return; }
+    let alive = true;
+    supabase.auth.oauth.getAuthorizationDetails(id).then(({ data, error }) => {
+      if (!alive) return;
+      if (error) { setErr(/expired|not found|invalid/i.test(error.message) ? 'This request has expired. Start the connection again from your AI app.' : error.message); return; }
+      if (data && !('authorization_id' in data) && data.redirect_url) { window.location.href = data.redirect_url; return; } // already allowed
+      setDetails(data);
+    });
+    return () => { alive = false; };
+  }, [id]);
+  async function decide(allow) {
+    setBusy(true); setErr(null);
+    const { data, error } = allow ? await supabase.auth.oauth.approveAuthorization(id, { skipBrowserRedirect: true }) : await supabase.auth.oauth.denyAuthorization(id, { skipBrowserRedirect: true });
+    if (error) { setErr(error.message); setBusy(false); return; }
+    window.location.href = data.redirect_url;
+  }
+  const client = details && details.client;
+  const app = client && client.name ? client.name : 'This app';
+  const ROLE = { owner: 'an owner', estimator: 'an estimator', viewer: 'a viewer' };
+  return h('div', { className: 'gl-auth' },
+    h('div', { className: 'gl-auth__card' },
+      h(Brand, null),
+      err ? h(Frag, null, h('h1', { className: 'headline-small' }, 'Could not connect'), h(M.Banner, { tone: 'error', compact: true }, err), h('div', { className: 'gl-auth__actions' }, h(M.Button, { variant: 'text', onClick: () => { window.location.href = '/app'; } }, 'Open Benchstake')))
+      : !details ? h(M.LoadingIndicator, { label: 'Checking the request' })
+      : h(Frag, null,
+        h('h1', { className: 'headline-small' }, 'Connect ' + app + ' to Benchstake?'),
+        org ? h('p', { className: 'body-medium' }, app + ' will be able to read and change bids, estimates and the cost library at ', h('strong', null, org.name), ', as you (', h('strong', null, p.name || user.email), ', ' + (ROLE[org.role] || org.role) + ').')
+          : h(M.Banner, { tone: 'warning', compact: true }, 'This account has not set up a company yet. Open Benchstake, finish setup, then connect again.'),
+        h('ul', { className: 'body-medium gl-consent__list' },
+          h('li', null, 'Every change it makes is recorded in the history with your name, and can be undone like any other change.'),
+          h('li', null, 'It cannot see other companies, and a viewer account stays read-only.'),
+          h('li', null, 'Disconnect it any time in Benchstake under Settings › Connected AI.')),
+        client && client.uri ? h('p', { className: 'body-small gl-dim' }, 'Requested by ' + client.uri) : null,
+        h('div', { className: 'gl-auth__actions' },
+          h(M.Button, { variant: 'text', disabled: busy, onClick: () => decide(false) }, 'Don’t allow'),
+          h(M.Button, { variant: 'filled', size: 'm', disabled: busy || !org, onClick: () => decide(true) }, busy ? 'Connecting…' : 'Allow'))),
+      h('p', { className: 'body-small gl-dim' }, 'Signed in as ' + user.email + '. ', h('button', { type: 'button', className: 'gl-link gl-linkbtn', onClick: p.onSignOut }, 'Not you? Sign out'))));
+}
+
+/* ---------- Connected AI apps (Settings › Connected AI) ---------- */
+export function ConnectedAiPanel(p) {
+  const { supabase } = p;
+  const [grants, setGrants] = useState(null);
+  const [err, setErr] = useState(null);
+  async function load() { const { data, error } = await supabase.auth.oauth.listGrants(); if (error) { setErr(error.message); setGrants([]); } else setGrants(data || []); }
+  useEffect(() => { load(); }, []);
+  async function revoke(g) { setErr(null); const { error } = await supabase.auth.oauth.revokeGrant({ clientId: g.client.id }); if (error) setErr(error.message); else load(); }
+  if (grants === null) return h('div', { className: 'body-small gl-dim' }, 'Checking connected apps…');
+  return h(Frag, null,
+    grants.length ? h('div', { className: 'gl-invites' },
+      h('div', { className: 'label-medium gl-dim' }, 'Connected now'),
+      grants.map(g => h('div', { key: g.client.id, className: 'gl-invites__row body-medium' },
+        h(M.Icon, { name: 'smart_toy', size: 20 }), h('span', null, g.client.name || 'An AI app'), h('span', { className: 'gl-dim body-small' }, 'since ' + new Date(g.granted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })),
+        h(M.Button, { variant: 'text', size: 'xs', onClick: () => revoke(g) }, 'Disconnect'))))
+      : h('div', { className: 'body-small gl-dim' }, 'No AI app is connected to your account yet.'),
     err ? h(M.Banner, { tone: 'error', compact: true, onClose: () => setErr(null) }, err) : null);
 }

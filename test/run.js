@@ -38,6 +38,10 @@ function makeXlsx() {
     if (u.hostname === 'fonts.googleapis.com' && localFonts) return route.fulfill({ status: 200, contentType: 'text/css', body: fontCss });
     if (FONT_HOSTS.includes(u.hostname)) return route.continue(); // real Google Fonts when no local copies (CI)
     if (u.hostname !== 'local.test') return route.abort();
+    if (u.pathname === '/api/read-quote') { // the AI quote reader, stubbed: prices the first two lines of whatever package was sent
+      const body = JSON.parse(route.request().postData() || '{}'); const lines = (body.package && body.package.lines) || [];
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ quote: { vendor: 'Granite Peak Materials', is_quote: true, lines: lines.slice(0, 2).map((l, i) => ({ item_id: l.itemId, unit_price: 70 + i, qty: i === 0 ? Math.round(l.qty * 0.9) : undefined, quoted_as: l.name + ' @ ' + (70 + i), certain: i === 0 })), unmatched: [{ description: 'Mobilization', amount: 2500 }], exclusions: ['Excludes traffic control'], problems: [] } }) });
+    }
     if (u.pathname.startsWith('/__fonts/')) return route.fulfill({ status: 200, contentType: 'font/woff2', body: fs.readFileSync(path.join(vendor, path.basename(u.pathname))) });
     let p = path.join(DIST, u.pathname);
     if (!fs.existsSync(p) || fs.statSync(p).isDirectory()) p = path.join(DIST, 'index.html'); // SPA fallback, like vercel.json
@@ -128,6 +132,18 @@ function makeXlsx() {
   await page.getByRole('dialog').getByLabel('Unit price').first().fill('41.5');
   await page.getByRole('button', { name: 'Save quote' }).click(); await page.waitForTimeout(250);
   check((await page.getByText('Wasatch Pipe Supply').count()) >= 1, 'a quote can be entered by hand, with a new company');
+  // a quote read from a file (the AI reader is stubbed above): the dialog fills in and waits for review
+  const pdf = path.join(__dirname, 'tmp-quote.pdf'); fs.writeFileSync(pdf, '%PDF-1.4 fake quote');
+  await page.locator('.gl-pkg').filter({ hasText: 'HMA 1/2 in. supply' }).locator('input[type=file]').setInputFiles(pdf);
+  await page.waitForTimeout(400);
+  check((await page.getByRole('dialog').getByText(/Read from tmp-quote\.pdf: 1 of 1 item/).count()) === 1, 'quote from file: the dialog says what it read');
+  check((await page.getByRole('dialog').getByRole('combobox').first().inputValue()) !== '__new' && (await page.getByRole('dialog').getByLabel('Unit price').first().inputValue()) === '70', 'quote from file: matched the known vendor and filled the unit price');
+  check((await page.getByRole('dialog').getByText(/Quoted 10,080 TON, bid has 11,200/).count()) === 1, 'quote from file: a quantity mismatch is flagged on the line');
+  check(/Excludes traffic control.*Not matched: Mobilization/.test(await page.getByRole('dialog').getByRole('textbox', { name: 'Notes and exclusions' }).inputValue()), 'quote from file: exclusions and unmatched lines land in the notes');
+  await shot('03b-quote-from-file');
+  await page.getByRole('button', { name: 'Save quote' }).click(); await page.waitForTimeout(300);
+  check((await page.getByText(/Saved the quote from Granite Peak/).count()) === 1, 'quote from file saves like a typed quote');
+  fs.unlinkSync(pdf);
   await shot('03-quotes');
   await page.getByRole('tab', { name: 'Checks' }).click();
   await page.getByRole('button', { name: 'Go to' }).first().click(); await page.waitForTimeout(200);
@@ -213,6 +229,7 @@ function makeXlsx() {
   await page.getByRole('button', { name: 'Account' }).click();
   await page.getByRole('menuitem', { name: 'Settings' }).click(); await page.waitForTimeout(300);
   check((await page.getByText('Bid defaults').count()) === 1, 'settings screen opens from the account menu');
+  check((await page.getByText('https://benchstake.com/api/mcp').count()) === 1, 'settings shows the AI connector address');
   await page.getByRole('textbox', { name: 'Overhead' }).fill('8'); await page.keyboard.press('Tab'); await page.waitForTimeout(250);
   await page.getByRole('textbox', { name: 'Contractor license no.' }).fill('UT 123456-5501'); await page.keyboard.press('Enter'); await page.waitForTimeout(250);
   await shot('05c-settings');

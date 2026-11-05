@@ -249,6 +249,7 @@ import * as R from 'react';
   /* ---------- Settings screen ---------- */
   // Company details and bid defaults live in doc.setup (saved with the library, so the whole team shares them).
   // Theme and field mode are per device, so they stay in ui.
+  GL.MCP_URL = (typeof window !== 'undefined' && /^https?:\/\/(localhost|127\.)/.test(window.location.origin) ? window.location.origin : 'https://benchstake.com') + '/api/mcp';
   var BID_DEFAULTS = { overhead: 6, profit: 4, bond: 1.2, tax: 0, targetMargin: 9, dueTime: '2:00 PM' };
   GL.bidDefaults = function (doc) { return Object.assign({}, BID_DEFAULTS, doc.setup && doc.setup.bidDefaults); };
   GL.companyInfo = function (doc) { return Object.assign({ address: '', phone: '', license: '' }, doc.setup && doc.setup.company); };
@@ -301,6 +302,16 @@ import * as R from 'react';
           h(GL.TimeField, { label: 'Bids usually due at', value: defaults.dueTime, onChange: function (v) { if (v) setDefault('dueTime', v, 'Bid time', false); } }))),
       h(GL.Section, { title: 'Exports', subtitle: 'Where the budget export goes. Each bid can still pick another system.' },
         h(GL.Select, { label: 'Accounting system', value: acct, placeholder: 'Choose a system', options: Object.keys(SYSTEMS).map(function (k) { return { value: k, label: SYSTEMS[k] }; }), onChange: function (k) { if (!k) return; api.update(function (dd) { dd.setup = Object.assign({}, dd.setup, { accounting: k }); }, { title: 'Set the accounting export to ' + SYSTEMS[k], icon: 'account_balance' }); p.toast('Budget exports default to ' + SYSTEMS[k] + '.'); } })),
+      h(GL.Section, { title: 'Connected AI', subtitle: 'Let Claude, ChatGPT or another AI app read and change your bids as you. Every change it makes shows in the history with your name and can be undone.' },
+        h('div', { className: 'gl-settings__note' }, h(M.Icon, { name: 'smart_toy', size: 24 }),
+          h('div', { className: 'gl-settings__notebody' },
+            h('div', { className: 'title-small' }, 'Add Benchstake as a connector'),
+            h('ol', { className: 'body-medium gl-settings__steps' },
+              h('li', null, 'In Claude, open Customize › Connectors and choose Add custom connector. In ChatGPT or another app, look for connectors or MCP servers.'),
+              h('li', null, 'Paste this address: ', h('code', { className: 'gl-code' }, GL.MCP_URL), h(M.IconButton, { icon: 'content_copy', label: 'Copy the connector address', size: 'xs', onClick: function () { if (navigator.clipboard) navigator.clipboard.writeText(GL.MCP_URL).then(function () { p.toast('Copied.'); }); } })),
+              h('li', null, 'When it asks you to sign in, use your Benchstake email and tap Allow.')),
+            h('div', { className: 'body-small gl-dim' }, 'Then ask things like "what quotes are still out on SR-7?", or drop in a sub\'s PDF and say "enter this quote on the pipe package."'))),
+        p.demo ? h('div', { className: 'body-small gl-dim' }, 'Sign in to connect an AI app to your own company; the sample company can\'t be connected.') : session.aiPanel || null),
       h(GL.Section, { title: 'Appearance', subtitle: 'Saved on this device.' },
         h('div', { className: 'gl-settings__row' },
           h('div', { className: 'gl-settings__label' }, h('div', { className: 'title-small' }, 'Theme'), h('div', { className: 'body-small gl-dim' }, 'Sunlight is a high-contrast look for tablets outdoors.')),
@@ -558,12 +569,42 @@ import * as R from 'react';
   function QuoteDialog(p) {
     var pkg = p.pkg, q = p.quote, lib = p.doc.library;
     var NEW = '__new';
-    var init = { vendorId: q ? q.vendorId || NEW : (lib.vendors[0] ? lib.vendors[0].id : NEW), newName: q && !q.vendorId ? q.vendorName || '' : '', newTrade: '', mode: q && q.lump != null ? 'lump' : 'unit', lump: q && q.lump != null ? String(q.lump) : '', prices: {}, note: q && q.note ? q.note : '' };
+    var init = { vendorId: q ? q.vendorId || NEW : (lib.vendors[0] ? lib.vendors[0].id : NEW), newName: q && !q.vendorId ? q.vendorName || '' : '', newTrade: '', mode: q && q.lump != null ? 'lump' : 'unit', lump: q && q.lump != null ? String(q.lump) : '', prices: {}, lineQty: q && q.lineQty ? q.lineQty : {}, note: q && q.note ? q.note : '' };
     pkg.lines.forEach(function (l) { var up = q && q.lump == null && q.unitPrices ? q.unitPrices[l.itemId] : null; init.prices[l.itemId] = up != null ? String(up) : ''; });
     var f = useState(init);
     var v = f[0];
+    var fRef = useRef(v); fRef.current = v;
     function set(k, val) { var o = Object.assign({}, v); o[k] = val; f[1](o); }
     function setPrice(id, val) { var pr = Object.assign({}, v.prices); pr[id] = val; set('prices', pr); }
+    // Reading a quote document (PDF, photo or pasted text) fills the fields in; nothing saves until Save quote.
+    var reading = useState(p.read ? 'busy' : null);
+    var readNote = useState(null);
+    var pasteOpen = useState(false), pasteText = useState('');
+    var uncertain = useState({});
+    async function readFrom(opts) {
+      reading[1]('busy'); readNote[1](null);
+      try {
+        var token = p.getToken ? await p.getToken() : null;
+        var r = await p.readQuote(Object.assign({ pkg: pkg, vendors: lib.vendors, token: token }, opts));
+        var cur = fRef.current, o = Object.assign({}, cur, { prices: Object.assign({}, cur.prices), lineQty: Object.assign({}, cur.lineQty) });
+        var vname = (r.vendor || '').trim(); var known = vname ? lib.vendors.find(function (x) { return x.name.toLowerCase() === vname.toLowerCase(); }) : null;
+        if (known) o.vendorId = known.id; else if (vname) { o.vendorId = NEW; o.newName = vname; }
+        var unc = {};
+        if (r.lines && r.lines.length) { o.mode = 'unit'; r.lines.forEach(function (l) { o.prices[l.item_id] = String(l.unit_price); if (l.qty != null) o.lineQty[l.item_id] = l.qty; if (l.certain === false) unc[l.item_id] = l.quoted_as || 'check this one'; }); }
+        else if (r.lump_sum != null) { o.mode = 'lump'; o.lump = String(r.lump_sum); }
+        var notes = [].concat(r.exclusions || []).concat((r.unmatched || []).map(function (u) { return 'Not matched: ' + u.description + (u.unit_price != null ? ' @ ' + GL.fmtMoney(u.unit_price, 2) : u.amount != null ? ' ' + GL.fmtMoney(u.amount) : ''); }));
+        if (notes.length) o.note = (o.note ? o.note + ' · ' : '') + notes.join(' · ');
+        f[1](o); uncertain[1](unc);
+        var priced = (r.lines || []).length, probs = (r.problems || []);
+        var qtyOff = pkg.lines.some(function (l) { return o.lineQty[l.itemId] != null && Math.abs(o.lineQty[l.itemId] - l.qty) / (l.qty || 1) > 0.02; });
+        readNote[1]({ tone: !r.is_quote ? 'warning' : probs.length || Object.keys(unc).length || qtyOff ? 'warning' : 'success',
+          text: !r.is_quote ? 'That does not look like a price quote. Check what came through before saving.'
+            : 'Read from ' + (opts.file ? opts.file.name : 'the pasted text') + ': ' + (r.lump_sum != null && !priced ? 'one lump sum' : priced + ' of ' + pkg.lines.length + ' item' + (pkg.lines.length === 1 ? '' : 's') + ' priced') + (r.unmatched && r.unmatched.length ? ', ' + r.unmatched.length + ' line' + (r.unmatched.length === 1 ? '' : 's') + ' not matched (in the notes)' : '') + '. Check the numbers against the quote before saving.' + (probs.length ? ' ' + probs.join(' ') : '') });
+      } catch (e) { readNote[1]({ tone: 'error', text: e.message || 'Could not read that.' }); }
+      reading[1](null);
+    }
+    useEffect(function () { if (p.read) readFrom(p.read); }, []);
+    function onFile(e) { var file = e.target.files && e.target.files[0]; e.target.value = ''; if (file) readFrom({ file: file }); }
     var total = v.mode === 'lump' ? Number(v.lump) || 0 : pkg.lines.reduce(function (a, l) { var n = Number(v.prices[l.itemId]); return a + (v.prices[l.itemId] !== '' && !isNaN(n) ? n * l.qty : 0); }, 0);
     var filled = pkg.lines.filter(function (l) { return v.prices[l.itemId] !== '' && !isNaN(Number(v.prices[l.itemId])); }).length;
     var vendorOk = v.vendorId !== NEW || v.newName.trim();
@@ -574,11 +615,20 @@ import * as R from 'react';
         h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'),
         h(M.Button, { disabled: !ok, onClick: function () {
           var out = { vendorId: v.vendorId === NEW ? null : v.vendorId, newVendor: v.vendorId === NEW ? { name: v.newName.trim(), trade: v.newTrade.trim() } : null, note: v.note.trim() };
-          if (v.mode === 'lump') { out.lump = Math.round(Number(v.lump) * 100) / 100; out.unitPrices = null; }
-          else { out.lump = null; out.unitPrices = {}; pkg.lines.forEach(function (l) { if (v.prices[l.itemId] !== '' && !isNaN(Number(v.prices[l.itemId]))) out.unitPrices[l.itemId] = Number(v.prices[l.itemId]); }); }
+          if (v.mode === 'lump') { out.lump = Math.round(Number(v.lump) * 100) / 100; out.unitPrices = null; out.lineQty = null; }
+          else { out.lump = null; out.unitPrices = {}; out.lineQty = {}; pkg.lines.forEach(function (l) { if (v.prices[l.itemId] !== '' && !isNaN(Number(v.prices[l.itemId]))) { out.unitPrices[l.itemId] = Number(v.prices[l.itemId]); if (v.lineQty[l.itemId] != null) out.lineQty[l.itemId] = v.lineQty[l.itemId]; } }); if (!Object.keys(out.lineQty).length) out.lineQty = null; }
           p.onSave(out);
         } }, 'Save quote')) },
       h('div', { className: 'gl-dialog__form' },
+        p.readQuote ? h('div', { className: 'gl-readquote' },
+          reading[0] ? h('div', { className: 'gl-readquote__busy' }, h(M.LoadingIndicator, { label: 'Reading the quote' }), h('span', { className: 'body-medium' }, 'Reading the quote…')) : h('div', { className: 'm3-row' },
+            h('label', { className: 'm3-btn m3-btn--tonal m3-btn--xs m3-btn--round gl-filebtn' }, h(M.Icon, { name: 'document_scanner', size: 18 }), ' Read from PDF or photo', h('input', { type: 'file', accept: '.pdf,image/*', onChange: onFile, style: { position: 'absolute', opacity: 0, width: 1, height: 1 }, 'aria-label': 'Read a quote from a PDF or photo' })),
+            h(M.Button, { variant: 'text', size: 'xs', icon: 'content_paste', onClick: function () { pasteOpen[1](!pasteOpen[0]); } }, 'Paste an email'),
+            h('span', { className: 'body-small gl-dim' }, 'The AI reads the document; you check the numbers; Benchstake prices the bid.')),
+          pasteOpen[0] && !reading[0] ? h('div', { className: 'gl-readquote__paste' },
+            h(GL.Field, { label: 'Quote text', value: pasteText[0], onChange: pasteText[1], multiline: true, placeholder: 'Paste the email or the quote text here' }),
+            h(M.Button, { variant: 'tonal', size: 'xs', disabled: !pasteText[0].trim(), onClick: function () { pasteOpen[1](false); readFrom({ text: pasteText[0] }); } }, 'Read it')) : null,
+          readNote[0] ? h(M.Banner, { tone: readNote[0].tone, compact: true, onClose: function () { readNote[1](null); } }, readNote[0].text) : null) : null,
         h('div', { className: 'm3-row', style: { gap: 12, alignItems: 'flex-start' } },
           h(GL.Select, { label: 'Company', value: v.vendorId, options: options, onChange: function (x) { set('vendorId', x); } }),
           v.vendorId === NEW ? h(GL.Field, { label: 'Company name', value: v.newName, onChange: function (x) { set('newName', x); }, required: true }) : null,
@@ -588,7 +638,7 @@ import * as R from 'react';
           var n = Number(v.prices[l.itemId]);
           return h('div', { key: l.itemId, className: 'gl-quoteline' },
             h('span', { className: 'gl-quoteline__name body-medium' }, (l.item && l.item.code ? l.item.code + ' ' : '') + (l.item ? l.item.name : ''), h('span', { className: 'gl-dim body-small' }, ' · ' + GL.fmtNum(l.qty) + ' ' + l.unit)),
-            h(GL.Field, { label: 'Unit price', prefix: '$', suffix: '/ ' + l.unit, value: v.prices[l.itemId], inputMode: 'decimal', onChange: function (x) { setPrice(l.itemId, x); }, className: 'gl-field gl-field--money' }),
+            h(GL.Field, { label: 'Unit price', prefix: '$', suffix: '/ ' + l.unit, value: v.prices[l.itemId], inputMode: 'decimal', onChange: function (x) { setPrice(l.itemId, x); }, className: 'gl-field gl-field--money', error: !!uncertain[0][l.itemId], supportingText: uncertain[0][l.itemId] ? 'Check: ' + uncertain[0][l.itemId] : (v.lineQty[l.itemId] != null && Math.abs(v.lineQty[l.itemId] - l.qty) / (l.qty || 1) > 0.02 ? 'Quoted ' + GL.fmtNum(v.lineQty[l.itemId]) + ' ' + l.unit + ', bid has ' + GL.fmtNum(l.qty) : undefined) }),
             h('span', { className: 'gl-quoteline__ext body-medium' }, v.prices[l.itemId] !== '' && !isNaN(n) ? GL.fmtMoney(n * l.qty) : h('span', { className: 'gl-dim' }, 'no price')));
         })) : h(GL.Field, { label: 'Lump sum for the package', prefix: '$', value: v.lump, inputMode: 'decimal', onChange: function (x) { set('lump', x); }, supportingText: 'Spread over the pay items in proportion to your plugs, so each item gets a unit price.', className: 'gl-field gl-field--money' }),
         h(GL.Field, { label: 'Notes and exclusions', value: v.note, onChange: function (x) { set('note', x); }, placeholder: 'Excludes traffic control. Good for 30 days.' }),
@@ -894,7 +944,7 @@ import * as R from 'react';
         toast('Added ' + v.name.trim() + '. Set a plug on each item until quotes come in.'); close();
       } });
       else if (dlg.kind === 'quote') { var qpkg = d.packages.find(function (x) { return x.id === dlg.packageId; }); var qq = qpkg && dlg.quoteId ? qpkg.quotes.find(function (x) { return x.id === dlg.quoteId; }) : null;
-        if (qpkg) dlgNode = h(QuoteDialog, { doc: doc, pkg: qpkg, quote: qq, onClose: close,
+        if (qpkg) dlgNode = h(QuoteDialog, { doc: doc, pkg: qpkg, quote: qq, onClose: close, read: dlg.read || null, readQuote: GL.readQuote, getToken: session.getToken || null,
           onDelete: function () { api.update(function (doc) { var pk = curEst(doc).packages.find(function (x) { return x.id === qpkg.id; }); pk.quotes = pk.quotes.filter(function (x) { return x.id !== qq.id; }); if (pk.selectedQuoteId === qq.id) pk.selectedQuoteId = null; }, { title: 'Removed quote from ' + (qq.vendor ? qq.vendor.name : 'a vendor'), detail: qpkg.name, icon: 'delete' }); toast('Removed the quote.', 'Undo', api.undo); close(); },
           onSave: function (v) {
             var vid = v.vendorId, vname = v.newVendor ? v.newVendor.name : (doc.library.vendors.find(function (x) { return x.id === vid; }) || {}).name;
@@ -902,7 +952,7 @@ import * as R from 'react';
             api.update(function (doc) {
               if (v.newVendor && !doc.library.vendors.some(function (x) { return x.id === vid; })) doc.library.vendors.push({ id: vid, name: v.newVendor.name, trade: v.newVendor.trade || qpkg.name, kind: 'sub', contact: '', email: '' });
               var pk = curEst(doc).packages.find(function (x) { return x.id === qpkg.id; });
-              var rec = { vendorId: vid, status: 'received', unitPrices: v.unitPrices, lump: v.lump, note: v.note, receivedAt: new Date().toISOString().slice(0, 10) };
+              var rec = { vendorId: vid, status: 'received', unitPrices: v.unitPrices, lump: v.lump, lineQty: v.lineQty, note: v.note, receivedAt: new Date().toISOString().slice(0, 10) };
               var ex = qq ? pk.quotes.find(function (x) { return x.id === qq.id; }) : pk.quotes.find(function (x) { return x.vendorId === vid && x.status === 'pending'; });
               if (ex) { Object.keys(rec).forEach(function (k) { if (rec[k] == null) delete ex[k]; else ex[k] = rec[k]; }); }
               else { var nq = { id: GL.uid('Q') }; Object.keys(rec).forEach(function (k) { if (rec[k] != null) nq[k] = rec[k]; }); pk.quotes.push(nq); }
