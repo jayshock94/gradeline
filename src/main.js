@@ -21,8 +21,10 @@ import { LoginPage, OnboardingPage, CompanyNamePanel, TeamPanel, ConsentPage, Co
 const h = R.createElement, useState = R.useState, useEffect = R.useEffect;
 
 function usePath() {
-  const [path, setPath] = useState(window.location.pathname);
-  useEffect(() => { const f = () => setPath(window.location.pathname); window.addEventListener('popstate', f); return () => window.removeEventListener('popstate', f); }, []);
+  // a Site URL saved with a trailing slash makes links like //oauth/consent; treat repeated slashes as one
+  const clean = () => window.location.pathname.replace(/\/{2,}/g, '/');
+  const [path, setPath] = useState(clean);
+  useEffect(() => { const f = () => setPath(clean()); window.addEventListener('popstate', f); return () => window.removeEventListener('popstate', f); }, []);
   return [path, p => { window.history.pushState({}, '', p); setPath(p); }];
 }
 
