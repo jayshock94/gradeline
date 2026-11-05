@@ -10,6 +10,24 @@ function Brand(p) {
   return h('div', { className: 'gl-auth__brand' }, h(GL.Mark, { size: 36 }), h('span', { className: 'gl-auth__name' }, 'Benchstake'), p.tag ? h('span', { className: 'gl-auth__tag' }, p.tag) : null);
 }
 
+/* ---------- Shared helpers ---------- */
+// How many digits the emailed code has. Set in Supabase (Authentication › Email › Email OTP Length). The box accepts 6 to 10 either way.
+const CODE_DIGITS = 6;
+const FREE_MAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com', 'comcast.net', 'centurylink.net', 'xmission.com'];
+const MAIL_TYPOS = { 'gmial.com': 'gmail.com', 'gmai.com': 'gmail.com', 'gmal.com': 'gmail.com', 'gmail.co': 'gmail.com', 'gmail.con': 'gmail.com', 'outlok.com': 'outlook.com', 'outlook.con': 'outlook.com', 'hotmial.com': 'hotmail.com', 'hotmail.con': 'hotmail.com', 'yaho.com': 'yahoo.com', 'yahoo.con': 'yahoo.com', 'iclod.com': 'icloud.com' };
+const TRADE_WORDS = /(sitework|earthwork|earthworks|excavating|excavation|paving|grading|construction|contractors|contracting|utilities|civil|concrete)/g;
+
+function cleanEmail(v) { return (v || '').trim().toLowerCase(); }
+function validEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v); }
+function typoFix(v) { const [who, domain] = v.split('@'); return MAIL_TYPOS[domain] ? who + '@' + MAIL_TYPOS[domain] : null; }
+export function guessCompany(email) {
+  const domain = (cleanEmail(email).split('@')[1] || '');
+  if (!domain || FREE_MAIL.indexOf(domain) >= 0) return '';
+  return domain.split('.')[0].replace(/[-_]+/g, ' ').replace(TRADE_WORDS, ' $1 ').trim().split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+// Google refuses its sign-in inside apps' built-in browsers, so don't offer a button that will fail there.
+function inAppBrowser() { return /\bwv\b|FBAN|FBAV|Instagram|LinkedInApp|Line\/|Snapchat|TikTok|GSA\//.test(navigator.userAgent || ''); }
+
 /* ---------- Sign in ---------- */
 export function LoginPage(p) {
   const [email, setEmail] = useState('');
@@ -17,103 +35,144 @@ export function LoginPage(p) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [suggestion, setSuggestion] = useState(null);
+  const [wait, setWait] = useState(0);
   const redirect = window.location.origin + '/app';
-  // show Google only when it is switched on in Supabase (Authentication › Providers)
-  const [googleOn, setGoogleOn] = useState(false);
+  // Google and Microsoft buttons show only when they are switched on in Supabase (Authentication › Providers)
+  const [providers, setProviders] = useState({ google: false, azure: false });
   useEffect(() => {
     const url = import.meta.env.VITE_SUPABASE_URL, key = import.meta.env.VITE_SUPABASE_ANON_KEY;
     if (!url || !key) return;
-    fetch(url + '/auth/v1/settings', { headers: { apikey: key } }).then(r => r.ok ? r.json() : null).then(j => { if (j && j.external && j.external.google) setGoogleOn(true); }).catch(() => {});
+    fetch(url + '/auth/v1/settings', { headers: { apikey: key } }).then(r => r.ok ? r.json() : null).then(j => { if (j && j.external) setProviders({ google: !!j.external.google && !inAppBrowser(), azure: !!j.external.azure }); }).catch(() => {});
   }, []);
-  async function google() {
+  useEffect(() => {
+    if (!sent || wait <= 0) return undefined;
+    const t = setTimeout(() => setWait(w => Math.max(0, w - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [sent, wait]);
+  async function oauth(provider) {
     setBusy(true); setErr(null);
-    const { error } = await p.supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: redirect } });
-    if (error) { setErr(error.message); setBusy(false); }
+    const { error } = await p.supabase.auth.signInWithOAuth({ provider, options: { redirectTo: redirect, scopes: provider === 'azure' ? 'email' : undefined } });
+    if (error) { setErr('That sign-in didn’t work. Try again, or use your email.'); setBusy(false); }
   }
-  async function magic(e) {
-    e.preventDefault();
-    if (!/.+@.+\..+/.test(email)) { setErr('Enter your work email.'); return; }
+  async function sendCode(address) {
     setBusy(true); setErr(null);
-    const { error } = await p.supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: redirect } });
+    const { error } = await p.supabase.auth.signInWithOtp({ email: address, options: { emailRedirectTo: redirect } });
     setBusy(false);
     if (error) {
-      const wait = (error.message.match(/after (\d+) seconds?/i) || [])[1];
-      setErr(wait ? 'A code was just sent. Wait ' + wait + ' seconds, then try again, or use the code already in your inbox.' : /rate limit/i.test(error.message) ? 'Too many emails in a short time. Wait a minute, then try again.' : error.message);
-      if (wait) setSent(true);
-    } else { setSent(true); setCode(''); }
+      const secs = (error.message.match(/after (\d+) seconds?/i) || [])[1];
+      if (secs) { setWait(+secs); setSent(true); setErr('A code was just sent. Use that one, or request a new one when the timer ends.'); }
+      else setErr(/rate limit/i.test(error.message) ? 'Too many emails in a short time. Wait a minute, then try again.' : 'We couldn’t send your code. Try again in a minute.');
+    } else { setSent(true); setCode(''); setWait(60); }
   }
-  // the email carries a code as well as a link: typing the code works on any device and in any browser
-  async function verify(e) {
+  function submitEmail(e) {
     e.preventDefault();
-    const token = code.replace(/\s+/g, '');
-    if (!/^\d{6,10}$/.test(token)) { setErr('Enter the code from the email. It is all numbers.'); return; }
+    const address = cleanEmail(email);
+    setSuggestion(null);
+    if (!validEmail(address)) { setErr('That doesn’t look like an email address. Check for typos.'); return; }
+    setEmail(address);
+    const fix = typoFix(address);
+    if (fix) { setErr(null); setSuggestion(fix); return; }
+    sendCode(address);
+  }
+  async function verify(token) {
+    if (busy) return;
+    if (!/^\d{6,10}$/.test(token)) { setErr('Enter the code from the email. It’s all numbers.'); return; }
     setBusy(true); setErr(null);
-    const { error } = await p.supabase.auth.verifyOtp({ email: email.trim(), token, type: 'email' });
+    const { error } = await p.supabase.auth.verifyOtp({ email: cleanEmail(email), token, type: 'email' });
     setBusy(false);
-    if (error) setErr(/expired|invalid/i.test(error.message) ? 'That code did not work. It may have expired; send a new one.' : error.message);
+    if (error) setErr(/expired|invalid/i.test(error.message) ? 'That code didn’t work. Check the newest email from Benchstake, or send a new code.' : 'We couldn’t sign you in. Try again.');
+  }
+  // a pasted or autofilled code signs in by itself; a typed one signs in at full length once the length is set above
+  function changeCode(v) {
+    const digits = v.replace(/\D/g, '');
+    const jumped = digits.length - code.length >= 4;
+    setCode(digits); setErr(null);
+    if ((jumped && digits.length >= 6) || (CODE_DIGITS && digits.length === CODE_DIGITS)) verify(digits);
+  }
+  const anyProvider = providers.google || providers.azure;
+  return h('div', { className: 'gl-auth' },
+    h('div', { className: 'gl-auth__card' },
+      h(Brand, null),
+      sent ? h(Frag, null,
+        h('h1', { className: 'headline-small' }, 'Check your email'),
+        h('p', { className: 'body-medium' }, 'We sent a code to ', h('strong', null, email), '. You can open the email on any device.'),
+        h('form', { onSubmit: e => { e.preventDefault(); verify(code); }, className: 'gl-auth__form' },
+          h(M.TextField, { variant: 'outlined', label: 'Code from the email', value: code, onChange: changeCode, inputMode: 'numeric', autoComplete: 'one-time-code', className: 'gl-auth__field', required: true }),
+          h(M.Button, { variant: 'filled', size: 'm', disabled: busy, type: 'submit' }, busy ? 'Signing in…' : 'Continue')),
+        err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
+        h('div', { className: 'gl-auth__links' },
+          h(M.Button, { variant: 'text', disabled: busy || wait > 0, onClick: () => sendCode(cleanEmail(email)) }, wait > 0 ? 'Resend code in 0:' + String(wait).padStart(2, '0') : 'Resend code'),
+          h(M.Button, { variant: 'text', onClick: () => { setSent(false); setErr(null); setCode(''); } }, 'Wrong email? Change it')),
+        wait === 0 ? h('p', { className: 'body-small gl-dim' }, 'Didn’t get it? Check spam or junk, or search your inbox for “Benchstake.” Company email can take a few minutes.') : null)
+      : h(Frag, null,
+        h('h1', { className: 'headline-small' }, 'Welcome to Benchstake'),
+        h('p', { className: 'body-medium gl-dim' }, 'New or returning, start here. No password.'),
+        providers.google ? h(M.Button, { variant: 'outlined', size: 'm', disabled: busy, onClick: () => oauth('google'), className: 'gl-auth__google' }, 'Continue with Google') : null,
+        providers.azure ? h(M.Button, { variant: 'outlined', size: 'm', disabled: busy, onClick: () => oauth('azure'), className: 'gl-auth__google' }, 'Continue with Microsoft') : null,
+        anyProvider ? h('div', { className: 'gl-auth__or' }, h('span', null, 'or use your email')) : null,
+        h('form', { onSubmit: submitEmail, className: 'gl-auth__form', noValidate: true },
+          h(M.TextField, { variant: 'outlined', label: 'Email', type: 'email', value: email, onChange: v => { setEmail(v); setErr(null); setSuggestion(null); }, autoComplete: 'email', autoCapitalize: 'none', spellCheck: false, className: 'gl-auth__field', required: true }),
+          suggestion ? h('div', { className: 'gl-suggest body-medium' }, h('span', null, 'Did you mean ' + suggestion + '?'), h('button', { type: 'button', className: 'gl-link gl-linkbtn', onClick: () => { setEmail(suggestion); setSuggestion(null); } }, 'Yes, use that')) : null,
+          h(M.Button, { variant: 'filled', size: 'm', disabled: busy, type: 'submit' }, busy ? 'Sending…' : 'Email me a code')),
+        err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
+        h('p', { className: 'body-small gl-dim' }, 'Just looking? ', h('a', { href: '/demo', className: 'gl-link' }, 'Try the demo'), ', no account needed.'))));
+}
+
+/* ---------- First run: name, company, then straight into a sample bid ---------- */
+export function OnboardingPage(p) {
+  const meta = (p.user && p.user.user_metadata) || {};
+  const [name, setName] = useState(meta.full_name || meta.name || '');
+  const [company, setCompany] = useState(() => guessCompany(p.email));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  async function create(e) {
+    e.preventDefault();
+    if (!name.trim()) { setErr('Enter your name.'); return; }
+    if (!company.trim()) { setErr('Enter your company name.'); return; }
+    setBusy(true); setErr(null);
+    const seed = GL.seed();
+    const sample = seed.bids.find(b => seed.estimates[b.id]);
+    const { id: sampleId, ...sampleData } = sample;
+    const library = { ...seed.library, __setup: { rates: true, crews: true, vendors: true, accounting: false, firstBid: true } };
+    const { data, error } = await p.supabase.rpc('create_organization', { p_name: company.trim(), p_library: library,
+      p_bids: [{ id: sampleId, data: { ...sampleData, name: 'Sample: ' + sampleData.name, sample: true } }],
+      p_estimates: [{ bid_id: sampleId, doc: seed.estimates[sampleId] }] });
+    if (error) { setBusy(false); setErr('We couldn’t set up your company. Try again.'); return; }
+    await p.supabase.auth.updateUser({ data: { full_name: name.trim() } });
+    await p.supabase.from('profiles').upsert({ user_id: p.user.id, display_name: name.trim(), email: p.user.email }, { onConflict: 'user_id' });
+    setBusy(false);
+    p.onCreated(data, company.trim(), sampleId);
   }
   return h('div', { className: 'gl-auth' },
     h('div', { className: 'gl-auth__card' },
-      h(Brand, { tag: 'Estimating and bidding for heavy civil' }),
-      sent ? h(Frag, null,
-        h('h1', { className: 'headline-small' }, 'Check your email'),
-        h('p', { className: 'body-medium' }, 'We sent a code to ', h('strong', null, email), '. Type it here to sign in. It works once and expires in an hour.'),
-        h('form', { onSubmit: verify, className: 'gl-auth__form' },
-          h(M.TextField, { variant: 'outlined', label: 'Code from the email', value: code, onChange: setCode, inputMode: 'numeric', autoComplete: 'one-time-code', className: 'gl-auth__field', required: true }),
-          h(M.Button, { variant: 'filled', size: 'm', icon: 'login', disabled: busy, type: 'submit' }, busy ? 'Signing in…' : 'Sign in')),
-        err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
-        h('p', { className: 'body-small gl-dim' }, 'Nothing there? Check spam, or ', h('button', { type: 'button', className: 'gl-link gl-linkbtn', onClick: magic }, 'send a new code'), '. Wrong address? ', h('button', { type: 'button', className: 'gl-link gl-linkbtn', onClick: () => { setSent(false); setErr(null); } }, 'Use a different email'), '.'))
-      : h(Frag, null,
-        h('h1', { className: 'headline-small' }, 'Sign in'),
-        h('p', { className: 'body-medium gl-dim' }, googleOn ? 'No passwords. Use your Google account, or get a one-time code by email.' : 'No passwords. Enter your email and we send you a one-time code.'),
-        googleOn ? h(M.Button, { variant: 'filled', size: 'm', icon: 'login', disabled: busy, onClick: google, className: 'gl-auth__google' }, 'Continue with Google') : null,
-        googleOn ? h('div', { className: 'gl-auth__or' }, h('span', null, 'or')) : null,
-        h('form', { onSubmit: magic, className: 'gl-auth__form' },
-          h(M.TextField, { variant: 'outlined', label: 'Work email', type: 'email', value: email, onChange: setEmail, autoComplete: 'email', className: 'gl-auth__field', required: true }),
-          h(M.Button, { variant: googleOn ? 'tonal' : 'filled', size: 'm', icon: 'mail', disabled: busy, type: 'submit' }, busy ? 'Sending…' : 'Email me a code')),
-        err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
-        h(M.Divider, null),
-        h('p', { className: 'body-small gl-dim' }, 'Just looking? ', h('a', { href: '/demo', className: 'gl-link' }, 'Open the demo'), ' with a sample company. Nothing to sign up for.'))));
+      h(Brand, null),
+      h('h1', { className: 'headline-small' }, 'Two quick questions'),
+      h('p', { className: 'body-medium gl-dim' }, 'Then you’re in, with a sample bid to look around.'),
+      h('form', { onSubmit: create, className: 'gl-auth__form', noValidate: true },
+        h(M.TextField, { variant: 'outlined', label: 'Your name', value: name, onChange: setName, autoComplete: 'name', className: 'gl-auth__field', required: true }),
+        h(M.TextField, { variant: 'outlined', label: 'Company name', value: company, onChange: setCompany, autoComplete: 'organization', className: 'gl-auth__field', required: true }),
+        h(M.Button, { variant: 'filled', size: 'm', disabled: busy, type: 'submit' }, busy ? 'Opening…' : 'Open my sample bid')),
+      err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
+      h('p', { className: 'body-small gl-dim' }, 'Were you invited? ', h('button', { type: 'button', className: 'gl-link gl-linkbtn', onClick: p.onSignOut }, 'Sign out'), ' and use the email address your invite went to.')));
 }
 
-/* ---------- First run: create the company ---------- */
-export function OnboardingPage(p) {
-  const [name, setName] = useState('');
-  const [start, setStart] = useState('starter');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-  async function create() {
-    if (!name.trim()) { setErr('Give your company a name.'); return; }
-    setBusy(true); setErr(null);
-    const seed = GL.seed();
-    let library = { labor: [], equipment: [], materials: [], crews: [], vendors: [] }, bids = [], estimates = [];
-    if (start === 'starter') library = seed.library;
-    if (start === 'sample') { library = seed.library; bids = seed.bids.map(b => { const { id, ...data } = b; return { id, data }; }); estimates = Object.keys(seed.estimates).map(k => ({ bid_id: k, doc: seed.estimates[k] })); }
-    library = { ...library, __setup: { rates: library.labor.length > 0, crews: library.crews.length > 0, vendors: library.vendors.length > 0, accounting: false, firstBid: bids.length > 0 } };
-    const { data, error } = await p.supabase.rpc('create_organization', { p_name: name.trim(), p_library: library, p_bids: bids, p_estimates: estimates });
-    setBusy(false);
-    if (error) { setErr(error.message); return; }
-    p.onCreated(data, name.trim());
-  }
-  const opts = [
-    { id: 'starter', title: 'Starter rates', body: 'Typical labor classes, machines, materials and crews to edit into yours. No bids.' },
-    { id: 'sample', title: 'Sample company', body: 'Starter rates plus nine sample bids and one priced estimate, so you can see everything working. Delete them whenever.' },
-    { id: 'empty', title: 'Empty', body: 'Nothing but your name. Paste your rates in from a spreadsheet.' }
-  ];
-  return h('div', { className: 'gl-auth' },
-    h('div', { className: 'gl-auth__card gl-auth__card--wide' },
-      h(Brand, null),
-      h('h1', { className: 'headline-small' }, 'Set up your company'),
-      h('p', { className: 'body-medium gl-dim' }, 'Signed in as ' + (p.email || 'you') + '. Your company is the private space your bids, estimates and cost library live in. You can invite your team afterwards.'),
-      h(M.TextField, { variant: 'outlined', label: 'Company name', value: name, onChange: setName, className: 'gl-auth__field', required: true, placeholder: 'Cascade Civil Constructors' }),
-      h('div', { className: 'label-medium gl-dim', style: { marginTop: 8 } }, 'Start with'),
-      h('div', { className: 'gl-choice' }, opts.map(o => h('button', { key: o.id, type: 'button', className: 'gl-choice__opt' + (start === o.id ? ' is-selected' : ''), onClick: () => setStart(o.id), 'aria-pressed': start === o.id },
-        h('span', { className: 'gl-choice__title' }, start === o.id ? h(M.Icon, { name: 'check_circle', size: 18, filled: true }) : h(M.Icon, { name: 'radio_button_unchecked', size: 18 }), o.title),
-        h('span', { className: 'gl-choice__body body-small' }, o.body)))),
-      err ? h(M.Banner, { tone: 'error', compact: true }, err) : null,
-      h('div', { className: 'gl-auth__actions' },
-        h(M.Button, { variant: 'text', onClick: p.onSignOut }, 'Sign out'),
-        h(M.Button, { variant: 'filled', size: 'm', icon: 'arrow_forward', disabled: busy, onClick: create }, busy ? 'Creating…' : 'Create company'))));
+/* ---------- Invites: save the invite, then email it from the server ---------- */
+export async function emailInvite(supabase, inviteId) {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session && data.session.access_token;
+    const res = await fetch('/api/send-invite', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ inviteId }) });
+    return res.ok;
+  } catch (e) { return false; }
+}
+export async function createInvite(supabase, org, user, address, role) {
+  const email = cleanEmail(address);
+  if (!validEmail(email)) return { error: 'Enter their email address.' };
+  const { data, error } = await supabase.from('invites').insert({ org_id: org.id, email, role, invited_by: user.id }).select('id').single();
+  if (error) return { error: error.code === '23505' ? 'That email is already invited.' : 'We couldn’t save that invite. Try again.' };
+  const emailed = await emailInvite(supabase, data.id);
+  return { email, emailed };
 }
 
 /* ---------- Company and team settings ---------- */
@@ -147,12 +206,12 @@ export function SettingsPage(p) {
 
   async function invite(e) {
     e.preventDefault(); setErr(null); setMsg(null);
-    if (!/.+@.+\..+/.test(email)) { setErr('Enter an email address.'); return; }
-    const { error } = await supabase.from('invites').insert({ org_id: org.id, email: email.trim().toLowerCase(), role, invited_by: user.id });
-    if (error) { setErr(error.code === '23505' ? 'That email is already invited.' : error.message); return; }
-    setMsg(email.trim() + ' can sign in with that email (Google or a sign-in link) and will land in ' + org.name + '.');
+    const r = await createInvite(supabase, org, user, email, role);
+    if (r.error) { setErr(r.error); return; }
+    setMsg(r.emailed ? 'Invite sent to ' + r.email + '.' : 'Invite saved, but the email didn’t send. Ask ' + r.email + ' to sign in at benchstake.com/app with that address.');
     setEmail(''); load();
   }
+  async function resendInvite(id, address) { setErr(null); setMsg(null); const ok = await emailInvite(supabase, id); if (ok) setMsg('Invite sent again to ' + address + '.'); else setErr('The email didn’t send. Ask ' + address + ' to sign in at benchstake.com/app with that address.'); }
   async function cancelInvite(id) { const { error } = await supabase.from('invites').delete().eq('id', id); if (error) setErr(error.message); load(); }
   async function remove(userId) { const { error } = await supabase.from('memberships').delete().eq('org_id', org.id).eq('user_id', userId); if (error) setErr(error.message); load(); }
   async function setMemberRole(userId, r) { const { error } = await supabase.from('memberships').update({ role: r }).eq('org_id', org.id).eq('user_id', userId); if (error) setErr(error.message); load(); }
@@ -179,7 +238,7 @@ export function SettingsPage(p) {
         h(M.Button, { variant: 'filled', icon: 'person_add', type: 'submit', style: { marginTop: 20 } }, 'Invite')) : null,
       invites.length ? h('div', { className: 'gl-invites' },
         h('div', { className: 'label-medium gl-dim' }, 'Invited, not signed in yet'),
-        invites.map(i => h('div', { key: i.id, className: 'gl-invites__row body-medium' }, h('span', null, i.email), h(M.StatusChip, { status: 'pending', label: roleOpts.find(o => o.value === i.role).label }), isOwner ? h(M.IconButton, { icon: 'close', label: 'Cancel invite', size: 'xs', onClick: () => cancelInvite(i.id) }) : null))) : null,
+        invites.map(i => h('div', { key: i.id, className: 'gl-invites__row body-medium' }, h('span', null, i.email), h(M.StatusChip, { status: 'pending', label: roleOpts.find(o => o.value === i.role).label }), isOwner ? h(M.IconButton, { icon: 'send', label: 'Send invite again', size: 'xs', onClick: () => resendInvite(i.id, i.email) }) : null, isOwner ? h(M.IconButton, { icon: 'close', label: 'Cancel invite', size: 'xs', onClick: () => cancelInvite(i.id) }) : null))) : null,
       msg ? h(M.Banner, { tone: 'success', compact: true, onClose: () => setMsg(null) }, msg) : null,
       err ? h(M.Banner, { tone: 'error', compact: true, onClose: () => setErr(null) }, err) : null),
     h(GL.Section, { title: 'You' },

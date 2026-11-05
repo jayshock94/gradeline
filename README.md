@@ -19,7 +19,7 @@ Built on the Gradeline design system (the design system artifact keeps that name
 Two ways to run it:
 
 - **Demo** (`/demo`): a sample company in your browser. No account, nothing to set up.
-- **Cloud** (`/app`): sign in with Google or an emailed link, create your company, invite your team. Everything saves to Supabase, two people can work on one estimate at once, and every change is in a shared history you can undo or jump back to.
+- **Cloud** (`/app`): sign in with an emailed code (or Google or Microsoft once they are switched on), set up your company, invite your team. Everything saves to Supabase, two people can work on one estimate at once, and every change is in a shared history you can undo or jump back to.
 
 ## Run it locally
 
@@ -51,7 +51,7 @@ npm run build && npm test   # production build + headless browser checks
 
 ### 3. First sign-in
 
-Open the site, **Sign in**, create your company (choose *Starter rates*, *Sample company* or *Empty*), then **Account › Company and team** to invite people by email. An invited person signs in with that same email and lands in your company.
+Open the site, **Sign in**, give your name and company name, and you land in a sample bid, then **Account › Company and team** to invite people by email. An invited person signs in with that same email and lands in your company.
 
 ## Roles
 

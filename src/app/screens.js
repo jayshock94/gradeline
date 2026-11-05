@@ -50,7 +50,7 @@ import * as R from 'react';
       h('div', { className: 'gl-filterbar' },
         h('div', { className: 'm3-row' }, [['all', 'All'], ['open', 'Open'], ['due', 'Due this week'], ['submitted', 'Submitted'], ['won', 'Won'], ['lost', 'Lost']].map(function (f) { return h(M.Chip, { key: f[0], variant: 'filter', label: f[1], selected: filter === f[0], onClick: function () { api.ui({ bidFilter: f[0] }); } }); })),
         h(M.Button, { variant: 'filled', icon: 'add', size: 's', onClick: function () { p.openDialog({ kind: 'newbid' }); } }, 'New bid')),
-      h(M.DataGrid, { label: 'Bids', columns: cols, rows: rows, density: 'standard', emptyText: 'No bids match this filter.', onSelect: function (r) { p.openBid(r.id); } }));
+      h(M.DataGrid, { label: 'Bids', columns: cols, rows: rows, density: 'standard', emptyText: doc.bids.length ? 'No bids match this filter.' : 'No bids yet. Choose New bid to start your first one.', onSelect: function (r) { p.openBid(r.id); } }));
   }
 
   /* ---------- Estimate screen wrapper ---------- */
@@ -618,6 +618,24 @@ import * as R from 'react';
         h('div', { className: 'body-medium' }, 'Total ' + GL.fmtMoney(p.total, 2) + ' at ' + p.margin.toFixed(1) + '% margin. The bid moves to Submitted on the Bids list. ' + (p.cloud ? 'You can reopen it from Bid day.' : 'You can undo this like anything else.'))));
   }
 
+  /* Invite a teammate. Owners only; the session supplies onSend, which saves the invite and emails it. */
+  function InviteDialog(p) {
+    var email = useState(''), role = useState('estimator'), busy = useState(false), err = useState(null);
+    async function send(e) {
+      e.preventDefault(); if (busy[0]) return;
+      busy[1](true); err[1](null);
+      var r = await p.onSend(email[0], role[0]);
+      busy[1](false);
+      if (r.error) err[1](r.error); else p.onSent(r);
+    }
+    return h(M.Dialog, { headline: 'Invite someone', icon: 'person_add', onClose: p.onClose, actions: h(Frag, null, h(M.Button, { variant: 'text', onClick: p.onClose }, 'Cancel'), h(M.Button, { disabled: busy[0], onClick: send }, busy[0] ? 'Sending…' : 'Send invite')) },
+      h('form', { className: 'gl-dialog__form', onSubmit: send, noValidate: true },
+        h(M.TextField, { variant: 'outlined', label: 'Their email', type: 'email', value: email[0], onChange: email[1], autoCapitalize: 'none', spellCheck: false, autoFocus: true, className: 'gl-field' }),
+        h(GL.Select, { label: 'Role', value: role[0], options: [{ value: 'estimator', label: 'Estimator' }, { value: 'viewer', label: 'Viewer' }], onChange: role[1] }),
+        h('div', { className: 'body-small gl-dim' }, role[0] === 'viewer' ? 'Viewers can look at bids but can’t change them.' : 'Estimators can build and change bids.'),
+        err[0] ? h(M.Banner, { tone: 'error', compact: true }, err[0]) : null));
+  }
+
   /* ---------- App shell ---------- */
   // App: the signed-in workspace. `store` comes from the local (demo) or cloud adapter; `session` carries who is here.
   function App(p) {
@@ -812,6 +830,7 @@ import * as R from 'react';
             }, { title: (qq ? 'Updated' : 'Entered') + ' quote from ' + vname, detail: qpkg.name, icon: 'request_quote' });
             toast('Saved the quote from ' + vname + '. Pick it under the package to use it.'); close();
           } }); }
+      else if (dlg.kind === 'invite') dlgNode = h(InviteDialog, { onClose: close, onSend: session.onInvite, onSent: function (r) { close(); toast(r.emailed ? 'Invite sent to ' + r.email + '.' : 'Invite saved, but the email didn’t send. Ask ' + r.email + ' to sign in at benchstake.com/app with that address.'); } });
       else if (dlg.kind === 'export') dlgNode = h(ExportDialog, { ui: ui, api: api, defaultSystem: doc.setup && typeof doc.setup.accounting === 'string' ? doc.setup.accounting : null, canDownload: canDl[0], onClose: close, onExport: exportBudget });
       else if (dlg.kind === 'submit') dlgNode = h(SubmitDialog, { total: d.totals.bidTotal, margin: d.totals.margin, onClose: close, onSubmit: function () { setBidStatus('submitted'); close(); if (cloud) toast('Marked as submitted. Reopen it from Bid day if anything changes.'); else toast('Marked as submitted.', 'Undo', api.undo); }, cloud: cloud });
     }
@@ -823,6 +842,25 @@ import * as R from 'react';
     var titles = { bids: 'Bids', estimate: 'Estimate', library: 'Cost library', insights: 'Insights' };
     var common = { doc: doc, ui: ui, api: api, d: d, width: width, peers: session.peers, demo: !cloud, company: company, openDialog: function (x) { dialog[1](x); }, toast: toast, toggleLock: toggleLock, deleteItem: deleteItem, deleteTask: deleteTask, canUndo: store.canUndo, canRedo: store.canRedo, setBidStatus: setBidStatus, openBid: openBid, startEstimate: startEstimate, downloadForm: downloadForm, stack: store.stack, index: store.index };
     var content = screen === 'bids' ? h(BidsScreen, common) : screen === 'estimate' ? h(EstimateScreen, common) : screen === 'library' ? h(LibraryScreen, common) : h(InsightsScreen, common);
+    /* first-run notices: joined a company, this is a sample bid, bring your team */
+    var curBid = doc.bids.find(function (b) { return b.id === doc.currentBidId; });
+    var onSample = screen === 'estimate' && curBid && curBid.sample;
+    function deleteSample() {
+      var id = curBid.id, name = curBid.name;
+      api.ui({ screen: 'bids', bidId: null });
+      api.update(function (dd) { dd.bids = dd.bids.filter(function (b) { return b.id !== id; }); delete dd.estimates[id]; if (dd.currentBidId === id) dd.currentBidId = dd.bids[0] ? dd.bids[0].id : null; }, { title: 'Deleted ' + name, icon: 'delete' });
+      toast('Deleted the sample bid.');
+    }
+    var ROLE_WORD = { owner: 'an owner', estimator: 'an estimator', viewer: 'a viewer' };
+    var notices = [
+      session.joined ? h(M.Banner, { key: 'joined', tone: 'success', headline: 'You joined ' + session.orgName, onClose: session.onDismissJoined }, 'You’re ' + (ROLE_WORD[session.role] || 'on the team') + '.') : null,
+      onSample && !ui.sampleNoticeDone ? h(M.Banner, { key: 'sample', tone: 'info', headline: 'This is a sample bid', onClose: function () { api.ui({ sampleNoticeDone: true }); }, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: deleteSample }, 'Delete sample') }, 'Change any quantity and watch the total move. Nothing here is real.') : null,
+      onSample && session.onInvite && store.canUndo && !ui.invitePromptDone ? h('div', { key: 'invite', className: 'gl-invitecard' },
+        h('div', { className: 'gl-invitecard__text' }, h('div', { className: 'title-small' }, 'Bid with your team?'), h('div', { className: 'body-medium gl-dim' }, 'Invite an estimator to work on bids with you.')),
+        h('div', { className: 'gl-invitecard__actions' },
+          h(M.Button, { variant: 'text', size: 'xs', onClick: function () { api.ui({ invitePromptDone: true }); } }, 'Not now'),
+          h(M.Button, { variant: 'tonal', size: 'xs', onClick: function () { api.ui({ invitePromptDone: true }); dialog[1]({ kind: 'invite' }); } }, 'Invite someone'))) : null
+    ].filter(Boolean);
     var themeIcon = { system: 'contrast', light: 'light_mode', dark: 'dark_mode', sunlight: 'wb_sunny' }[ui.theme || 'system'];
     return h('div', { className: 'gl-app' + (compact ? ' is-compact' : ''), 'data-theme': ui.theme && ui.theme !== 'system' ? ui.theme : undefined, 'data-money': ui.fieldMode ? 'hidden' : undefined },
       menu.node,
@@ -830,6 +868,7 @@ import * as R from 'react';
       h('div', { className: 'gl-main' },
         h(M.TopAppBar, { className: 'gl-appbar', title: h('span', { className: 'gl-appbar__title' }, compact ? null : h(GL.Mark, null), h('span', { className: 'gl-appbar__brand' }, 'Benchstake'), h('span', { className: 'gl-appbar__sep' }, '/'), h('span', { className: 'gl-appbar__screen' }, titles[screen])),
           actions: h(Frag, null,
+            session.onInvite ? (compact ? h(M.IconButton, { icon: 'person_add', label: 'Invite someone', onClick: function () { dialog[1]({ kind: 'invite' }); } }) : h(M.Button, { variant: 'tonal', size: 'xs', onClick: function () { dialog[1]({ kind: 'invite' }); } }, 'Invite')) : null,
             h(GL.Tip, { text: ui.fieldMode ? 'Show dollars' : 'Hide dollars (field mode)' }, h(M.IconButton, { icon: ui.fieldMode ? 'visibility_off' : 'visibility', label: ui.fieldMode ? 'Show dollars' : 'Hide dollars', toggle: true, selected: !!ui.fieldMode, onClick: function () { api.ui({ fieldMode: !ui.fieldMode }); toast(ui.fieldMode ? 'Dollars shown.' : 'Field mode: every amount is hidden until you turn it back on.'); } })),
             h(GL.Tip, { text: 'Theme' }, h(M.IconButton, { icon: themeIcon, label: 'Theme', onClick: function (e) { menu.open(e, [['system', 'Match system', 'contrast'], ['light', 'Light', 'light_mode'], ['dark', 'Dark', 'dark_mode'], ['sunlight', 'Sunlight (outdoor tablet)', 'wb_sunny']].map(function (t) { return { label: t[1], icon: t[2], selected: (ui.theme || 'system') === t[0], onClick: function () { api.ui({ theme: t[0] }); } }; }), 'Theme'); } })),
             h(GL.Tip, { text: 'Keyboard shortcuts (?)' }, h(M.IconButton, { icon: 'keyboard', label: 'Keyboard shortcuts', onClick: function () { dialog[1]({ kind: 'shortcuts' }); } })),
@@ -839,6 +878,7 @@ import * as R from 'react';
               { divider: true },
               api.reset ? { label: 'Reset sample data', icon: 'restart_alt', onClick: function () { api.reset(); toast('Sample data reset.'); } } : null,
               session.onSignOut ? { label: 'Sign out', icon: 'logout', onClick: session.onSignOut } : null].filter(Boolean), 'Account'); } })) }),
+        notices.length ? h('div', { className: 'gl-notices' }, notices) : null,
         h('main', { className: 'gl-content' }, content),
         compact ? h(M.NavigationBar, { items: navItems, value: screen, onChange: function (v) { api.ui({ screen: v }); }, label: 'Main', className: 'gl-navbar' }) : null),
       dlgNode,
