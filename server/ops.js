@@ -232,3 +232,128 @@ export function removeTask(draft, a) {
   est.tasks = est.tasks.filter(t => t !== hits[0]);
   return { entry: { title: 'Deleted task ' + hits[0].name, detail: it.code || it.name, icon: 'delete' }, say: 'Removed "' + hits[0].name + '" from ' + (it.code || it.name) + '.' };
 }
+
+// ---------- editing and cleaning up: what a person can do in the app ----------
+const STATUSES = ['draft', 'open', 'in-progress', 'review', 'submitted', 'won', 'lost', 'no-bid'];
+const usedBy = (doc, kind, id) => { let n = 0; const lib = doc.library;
+  if (kind === 'labor' || kind === 'equipment') lib.crews.forEach(c => (c[kind] || []).forEach(x => { if (x[0] === id) n++; }));
+  Object.keys(doc.estimates).forEach(k => { const e = doc.estimates[k] || {};
+    (e.tasks || []).forEach(t => { if ((kind === 'crews' && t.crewId === id) || (kind === 'materials' && t.matId === id)) n++; });
+    (e.packages || []).forEach(pk => { if (pk.selfPerform && ((kind === 'crews' && pk.selfPerform.crewId === id) || (kind === 'materials' && pk.selfPerform.matId === id))) n++; (pk.quotes || []).forEach(q => { if (kind === 'vendors' && q.vendorId === id) n++; }); }); });
+  return n; };
+
+export function updateBid(draft, a) {
+  const bid = findBid(draft, a.bid);
+  const changes = [];
+  const setText = (k, key, label) => { if (a[k] != null) { bid[key] = String(a[k]).trim(); changes.push(label); } };
+  setText('name', 'name', 'name'); setText('owner', 'owner', 'owner'); setText('location', 'location', 'location'); setText('estimator', 'estimator', 'estimator'); setText('note', 'note', 'note'); setText('due_time', 'dueTime', 'due time');
+  if (a.due != null) { if (!/^\d{4}-\d{2}-\d{2}$/.test(a.due)) throw new Error('due must be a date like 2026-11-20.'); bid.due = a.due; changes.push('due date'); }
+  if (a.type != null) { if (!['public', 'private'].includes(a.type)) throw new Error('type is public or private.'); bid.type = a.type; changes.push('work type'); }
+  if (a.status != null) { if (!STATUSES.includes(a.status)) throw new Error('status is one of ' + STATUSES.join(', ') + '.'); bid.status = a.status; changes.push('status ' + a.status); }
+  if (a.submitted_total != null) { bid.total = num(a.submitted_total, 'submitted_total'); changes.push('submitted total'); }
+  if (a.low_bid != null) { bid.lowBid = num(a.low_bid, 'low_bid'); changes.push('low bid'); }
+  if (!changes.length) throw new Error('Nothing to change.');
+  return { entry: { title: (a.status ? 'Marked ' + bid.name.split(',')[0] + ' as ' + a.status : 'Edited bid ' + bid.name), detail: changes.join(', '), icon: a.status === 'won' ? 'emoji_events' : a.status === 'submitted' ? 'send' : 'edit' }, say: 'Updated "' + bid.name + '": ' + changes.join(', ') + '.' };
+}
+
+export function deleteBid(draft, a) {
+  const bid = findBid(draft, a.bid);
+  draft.bids = draft.bids.filter(b => b.id !== bid.id); delete draft.estimates[bid.id];
+  return { entry: { title: 'Deleted bid ' + bid.name, icon: 'delete' }, say: 'Deleted the bid "' + bid.name + '" and its estimate.' };
+}
+
+export function updatePayItem(draft, a) {
+  const bid = findBid(draft, a.bid), est = estimateOf(draft, bid), it = findItem(est, a.item);
+  const changes = [];
+  if (a.code != null) { it.code = String(a.code).trim(); changes.push('code'); }
+  if (a.name != null) { it.name = String(a.name).trim(); changes.push('description'); }
+  if (a.unit != null) { it.unit = String(a.unit).trim().toUpperCase(); changes.push('unit ' + it.unit); }
+  if (a.qty != null) { it.qty = num(a.qty, 'qty'); changes.push('quantity ' + GL.fmtNum(it.qty)); }
+  if (!changes.length) throw new Error('Nothing to change.');
+  return { entry: { title: 'Edited ' + (it.code ? it.code + ' ' : '') + it.name, detail: changes.join(', '), icon: 'edit' }, say: 'Updated ' + (it.code || it.name) + ': ' + changes.join(', ') + '.' };
+}
+
+export function deletePayItem(draft, a) {
+  const bid = findBid(draft, a.bid), est = estimateOf(draft, bid), it = findItem(est, a.item);
+  const nt = est.tasks.filter(t => t.itemId === it.id).length;
+  est.items = est.items.filter(i => i.id !== it.id); est.tasks = est.tasks.filter(t => t.itemId !== it.id); delete est.locks[it.id];
+  est.packages.forEach(p => { p.lines = p.lines.filter(l => l.itemId !== it.id); });
+  return { entry: { title: 'Deleted ' + (it.code ? it.code + ' ' : '') + it.name, detail: nt + ' task' + (nt === 1 ? '' : 's') + ' removed with it', icon: 'delete' }, say: 'Deleted ' + (it.code || it.name) + ' and its ' + nt + ' task' + (nt === 1 ? '' : 's') + '.' };
+}
+
+export function updateTask(draft, a) {
+  const bid = findBid(draft, a.bid), est = estimateOf(draft, bid), it = findItem(est, a.item);
+  const mine = est.tasks.filter(t => t.itemId === it.id), q = norm(a.task);
+  const hits = mine.filter(t => t.id === a.task || norm(t.name) === q).length ? mine.filter(t => t.id === a.task || norm(t.name) === q) : mine.filter(t => norm(t.name).includes(q));
+  if (hits.length !== 1) throw new Error(hits.length ? '"' + a.task + '" matches ' + hits.length + ' tasks; be more specific.' : 'No task on ' + (it.code || it.name) + ' matches "' + a.task + '". Tasks: ' + (mine.map(t => t.name).join('; ') || 'none'));
+  const t = hits[0], changes = [];
+  if (a.name != null) { t.name = String(a.name).trim(); changes.push('name'); }
+  if (a.production != null) { if (t.type !== 'crew') throw new Error('production is for crew tasks.'); t.production = num(a.production, 'production'); changes.push('production ' + t.production + ' ' + it.unit + '/day'); }
+  if (a.crew != null) { if (t.type !== 'crew') throw new Error('crew is for crew tasks.'); t.crewId = findCrew(draft.library, a.crew).id; changes.push('crew'); }
+  if (a.per != null) { if (t.type !== 'material') throw new Error('per is for material tasks.'); t.per = num(a.per, 'per'); changes.push('quantity per unit'); }
+  if (a.plug != null) { if (t.type !== 'sub') throw new Error('plug is for sub tasks.'); t.plug = num(a.plug, 'plug'); changes.push('plug ' + money(t.plug, 2)); }
+  if (a.cost_per_unit != null) { if (t.type !== 'other') throw new Error('cost_per_unit is for other-cost tasks.'); t.perUnit = num(a.cost_per_unit, 'cost_per_unit'); delete t.amount; changes.push(money(t.perUnit, 2) + ' / ' + it.unit); }
+  if (a.lump_sum != null) { if (t.type !== 'other') throw new Error('lump_sum is for other-cost tasks.'); t.amount = num(a.lump_sum, 'lump_sum'); delete t.perUnit; changes.push(money(t.amount) + ' lump sum'); }
+  if (!changes.length) throw new Error('Nothing to change.');
+  const d = GL.derive(draft, bid.id);
+  return { entry: { title: 'Edited task ' + t.name, detail: (it.code || it.name) + ' · ' + changes.join(', '), icon: 'edit' }, say: 'Updated "' + t.name + '" on ' + (it.code || it.name) + ': ' + changes.join(', ') + '. Bid total ' + money(d.totals.bidTotal) + ' at ' + d.totals.margin.toFixed(1) + '% margin.' };
+}
+
+export function deletePackage(draft, a) {
+  const bid = findBid(draft, a.bid), est = estimateOf(draft, bid), pkg = findPackage(est, a.package);
+  est.packages = est.packages.filter(p => p.id !== pkg.id);
+  // sub tasks made for this package go too; sub tasks the person set up with a plug stay, unlinked
+  let removed = 0;
+  est.tasks = est.tasks.filter(t => { if (t.packageId !== pkg.id) return true; if (t.plug == null) { removed++; return false; } t.packageId = null; return true; });
+  return { entry: { title: 'Deleted quote package ' + pkg.name, detail: pkg.quotes.length + ' quote' + (pkg.quotes.length === 1 ? '' : 's') + (removed ? ', ' + removed + ' sub task' + (removed === 1 ? '' : 's') : ''), icon: 'delete' }, say: 'Deleted the package "' + pkg.name + '" with its ' + pkg.quotes.length + ' quote' + (pkg.quotes.length === 1 ? '' : 's') + (removed ? ' and ' + removed + ' sub task' + (removed === 1 ? '' : 's') + ' that only pointed at it' : '') + '.' };
+}
+
+export function removeQuote(draft, a) {
+  const bid = findBid(draft, a.bid), est = estimateOf(draft, bid), pkg = findPackage(est, a.package);
+  const vendor = findVendor(draft.library, needs(a.vendor, 'vendor'));
+  const q = vendor && pkg.quotes.find(x => x.vendorId === vendor.id);
+  if (!q) throw new Error('No quote from "' + a.vendor + '" on "' + pkg.name + '".');
+  if (a.declined) { Object.keys(q).forEach(k => { if (!['id', 'vendorId'].includes(k)) delete q[k]; }); q.status = 'declined'; if (a.note) q.note = String(a.note); if (pkg.selectedQuoteId === q.id) pkg.selectedQuoteId = null; return { entry: { title: vendor.name + ' declined ' + pkg.name, icon: 'block' }, say: 'Marked ' + vendor.name + ' as declined on "' + pkg.name + '".' }; }
+  pkg.quotes = pkg.quotes.filter(x => x !== q); if (pkg.selectedQuoteId === q.id) pkg.selectedQuoteId = null;
+  return { entry: { title: 'Removed quote from ' + vendor.name, detail: pkg.name, icon: 'delete' }, say: 'Removed ' + vendor.name + '\'s quote from "' + pkg.name + '".' };
+}
+
+const KINDS = { vendor: 'vendors', material: 'materials', labor: 'labor', equipment: 'equipment', crew: 'crews' };
+function libFind(lib, kind, ref) { const list = lib[kind], q = norm(ref); const hits = list.filter(x => x.id === ref || norm(x.name) === q).length ? list.filter(x => x.id === ref || norm(x.name) === q) : list.filter(x => norm(x.name).includes(q)); if (hits.length > 1) throw new Error('"' + ref + '" matches ' + hits.length + ' records: ' + hits.map(x => x.name).join('; ') + '.'); return hits[0] || null; }
+
+export function saveLibraryRecord(draft, a) {
+  const kind = KINDS[a.kind]; if (!kind) throw new Error('kind is one of ' + Object.keys(KINDS).join(', ') + '.');
+  const lib = draft.library;
+  let rec = a.record ? libFind(lib, kind, a.record) : null;
+  if (a.record && !rec) throw new Error('No ' + a.kind + ' matches "' + a.record + '". Leave record out to add a new one.');
+  const isNew = !rec;
+  if (isNew && lib[kind].some(x => norm(x.name) === norm(a.name))) throw new Error('The library already has a ' + a.kind + ' named "' + a.name + '". To change it, pass record: "' + a.name + '".');
+  if (isNew) { rec = { id: uid({ vendors: 'V', materials: 'M', labor: 'L', equipment: 'E', crews: 'C' }[kind]), name: String(needs(a.name, 'name')).trim() }; }
+  else if (a.name != null) rec.name = String(a.name).trim();
+  const f = a.fields || {};
+  if (kind === 'vendors') { ['trade', 'contact', 'email', 'phone'].forEach(k => { if (f[k] != null) rec[k] = String(f[k]).trim(); else if (isNew) rec[k] = ''; }); rec.kind = f.type === 'supplier' ? 'supplier' : f.type === 'sub' ? 'sub' : rec.kind || 'sub'; }
+  if (kind === 'materials') { if (f.unit != null) rec.unit = String(f.unit).toUpperCase(); else if (isNew) rec.unit = 'EA'; if (f.cost != null) rec.cost = num(f.cost, 'cost'); else if (isNew) throw new Error('A new material needs a cost per unit.'); }
+  if (kind === 'labor') { if (f.wage != null) { rec.wage = num(f.wage, 'wage'); rec.burden = f.burden != null ? num(f.burden, 'burden') : rec.burden || 0; } else if (f.burden != null) rec.burden = num(f.burden, 'burden'); if (f.rate != null && rec.wage == null) rec.rate = num(f.rate, 'rate'); if (isNew && rec.wage == null && rec.rate == null) throw new Error('A new labor class needs a wage (plus burden %) or a burdened hourly rate.'); rec.rate = GL.laborRate(rec); }
+  if (kind === 'equipment') { ['own', 'op', 'fuel'].forEach(k => { if (f[k] != null) rec[k] = num(f[k], k); }); if (f.rate != null && rec.own == null && rec.op == null && rec.fuel == null) rec.rate = num(f.rate, 'rate'); if (rec.own != null || rec.op != null || rec.fuel != null) { rec.own = rec.own || 0; rec.op = rec.op || 0; rec.fuel = rec.fuel || 0; } if (isNew && rec.rate == null && rec.own == null) throw new Error('A new machine needs an hourly rate, or ownership, operating and fuel per hour.'); rec.rate = GL.equipRate(rec); }
+  if (kind === 'crews') {
+    if (f.hours != null) rec.hours = num(f.hours, 'hours'); else if (isNew) rec.hours = 8;
+    const pairs = (list, k) => list.map(x => { const r = libFind(lib, k, x.name); if (!r) throw new Error('No ' + (k === 'labor' ? 'labor class' : 'machine') + ' matches "' + x.name + '".'); return [r.id, num(x.count == null ? 1 : x.count, 'count')]; });
+    if (Array.isArray(f.people)) rec.labor = pairs(f.people, 'labor'); else if (isNew) rec.labor = [];
+    if (Array.isArray(f.machines)) rec.equipment = pairs(f.machines, 'equipment'); else if (isNew) rec.equipment = [];
+    if (isNew && !rec.labor.length && !rec.equipment.length) throw new Error('A new crew needs people or machines.');
+  }
+  if (isNew) lib[kind].push(rec);
+  const word = { vendors: 'company', materials: 'material', labor: 'labor class', equipment: 'machine', crews: 'crew' }[kind];
+  const extra = kind === 'crews' ? ' Day rate ' + money(GL.crewRate(rec, lib).perDay) + '.' : kind === 'labor' || kind === 'equipment' ? ' ' + money(rec.rate, 2) + ' / hour.' : '';
+  return { entry: { title: (isNew ? 'Added ' : 'Edited ') + word + ' ' + rec.name, icon: isNew ? 'add' : 'edit' }, say: (isNew ? 'Added ' : 'Updated ') + word + ' "' + rec.name + '" in the library.' + extra + (isNew ? '' : ' Every estimate that uses it re-prices.') };
+}
+
+export function deleteLibraryRecord(draft, a) {
+  const kind = KINDS[a.kind]; if (!kind) throw new Error('kind is one of ' + Object.keys(KINDS).join(', ') + '.');
+  const rec = libFind(draft.library, kind, needs(a.record, 'record'));
+  if (!rec) throw new Error('No ' + a.kind + ' matches "' + a.record + '".');
+  const n = usedBy(draft, kind, rec.id);
+  if (n) throw new Error(rec.name + ' is used in ' + n + ' place' + (n > 1 ? 's' : '') + ' (tasks, crews or quotes). Change or remove those first, then delete it.');
+  draft.library[kind] = draft.library[kind].filter(x => x.id !== rec.id);
+  return { entry: { title: 'Deleted ' + rec.name + ' from the library', icon: 'delete' }, say: 'Deleted "' + rec.name + '" from the library.' };
+}

@@ -56,5 +56,34 @@ check(/plug price/.test(threw || ''), 'a sub task without a plug or package is r
 ops.removeTask(doc, { bid: sw.id, item: '1', task: crewName });
 check(doc.estimates[sw.id].tasks.length === 1, 'remove_task removes it');
 
+// editing and cleaning up
+ops.updateBid(doc, { bid: sw.id, status: 'lost', low_bid: 9800 });
+check(doc.bids.find(b => b.id === sw.id).status === 'lost' && doc.bids.find(b => b.id === sw.id).lowBid === 9800, 'update_bid marks a bid lost with the low bid');
+ops.updateTask(doc, { bid: sw.id, item: '1', task: 'Sewer line', cost_per_unit: 6 });
+check(Math.abs(GL.derive(doc, sw.id).totals.direct - 10536) < 0.01, 'update_task changes the cost per unit');
+ops.createPackage(doc, { bid: sw.id, name: 'Fake sub', items: ['1'], vendors: ['Test Sewer Sub'] });
+ops.enterQuote(doc, { bid: sw.id, package: 'Fake sub', vendor: 'Test Sewer Sub', unit_prices: [{ item: '1', unit_price: 5.45 }] });
+threw = null; try { ops.deleteLibraryRecord(doc, { kind: 'vendor', record: 'Test Sewer Sub' }); } catch (e) { threw = e.message; }
+check(/used in/.test(threw || ''), 'a vendor with a quote cannot be deleted yet');
+ops.deletePackage(doc, { bid: sw.id, package: 'Fake sub' });
+check(!doc.estimates[sw.id].packages.length && doc.estimates[sw.id].tasks.length === 1, 'delete_quote_package removes the package and the sub task it made, keeps the real task');
+ops.deleteLibraryRecord(doc, { kind: 'vendor', record: 'Test Sewer Sub' });
+check(!doc.library.vendors.some(v => v.name === 'Test Sewer Sub'), 'then the fake vendor can be deleted');
+ops.saveLibraryRecord(doc, { kind: 'labor', name: 'Pipe layer', fields: { wage: 30, burden: 40 } });
+check(doc.library.labor.find(l => l.name === 'Pipe layer').rate === 42, 'save_library_record adds a labor class at wage + burden ($42/hr)');
+threw = null; try { ops.saveLibraryRecord(doc, { kind: 'crew', name: 'Pipe crew', fields: { people: [{ name: 'Pipe layer', count: 3 }] } }); } catch (e) { threw = e.message; }
+check(/already has/.test(threw || ''), 'adding a record with a name already in the library is refused (no duplicates)');
+ops.saveLibraryRecord(doc, { kind: 'crew', name: 'Sewer crew', fields: { people: [{ name: 'Pipe layer', count: 3 }] } });
+check(doc.library.crews.find(c => c.name === 'Sewer crew').labor[0][1] === 3, 'save_library_record builds a crew from people');
+ops.saveLibraryRecord(doc, { kind: 'material', name: '8 in PVC', fields: { unit: 'lf', cost: 4.1 } });
+ops.saveLibraryRecord(doc, { kind: 'material', record: '8 in PVC', fields: { cost: 4.25 } });
+check(doc.library.materials.find(m => m.name === '8 in PVC').cost === 4.25, 'save_library_record edits an existing record');
+ops.updatePayItem(doc, { bid: sw.id, item: '1', qty: 1800, name: '8 in PVC sewer' });
+check(doc.estimates[sw.id].items[0].qty === 1800, 'update_pay_item changes quantity and description');
+ops.deletePayItem(doc, { bid: sw.id, item: '1' });
+check(!doc.estimates[sw.id].items.length && !doc.estimates[sw.id].tasks.length, 'delete_pay_item removes the item and its tasks');
+ops.deleteBid(doc, { bid: sw.id });
+check(!doc.bids.some(b => b.id === sw.id) && !doc.estimates[sw.id], 'delete_bid removes the bid and its estimate');
+
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall good');
 process.exit(fails ? 1 : 0);
