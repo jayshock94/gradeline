@@ -287,4 +287,5 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-legal__brand { color: inherit; text-decoration: none; }
 .gl-legal h1, .gl-legal h2, .gl-legal p { margin: 0; }
 .gl-legal section { display: flex; flex-direction: column; gap: var(--space-2); }
-.gl-auth__gbutton { min-height: 44px; display: flex; justify-content: center; }
+.gl-auth__gbutton { min-height: 44px; display: flex; justify-content: center; color-scheme: light; }
+.gl-auth__gbutton iframe { color-scheme: light; }
