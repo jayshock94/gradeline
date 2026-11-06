@@ -8,3 +8,4 @@ test/shots
 test/vendor
 dist-cloud
 test/tmp-*
+test/*.tmp.mjs
