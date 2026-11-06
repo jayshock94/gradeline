@@ -18,9 +18,10 @@ await page.goto('https://local.test/app'); await page.waitForTimeout(600); await
 console.log('login heading:', await page.locator('h1').first().innerText());
 console.log('heights html/body/root/auth:', await page.evaluate(() => [document.documentElement.clientHeight, document.body.offsetHeight, document.getElementById('root').offsetHeight, document.querySelector('.gl-auth').offsetHeight].join('/')));
 console.log('icon font loaded:', await page.evaluate(() => document.fonts.check('24px "Material Symbols Outlined"')));
-await page.getByRole('textbox', { name: /Work email/ }).fill('colton@example.com');
-await page.getByRole('button', { name: /Email me a sign-in link/ }).click(); await page.waitForTimeout(600);
+await page.getByRole('textbox', { name: /Email/ }).fill('colton@example.com');
+await page.getByRole('button', { name: /Email me a code/ }).click(); await page.waitForTimeout(600);
 await page.screenshot({ path: 'test/shots/auth-login-err.png' });
 console.log('after submit (offline backend):', (await page.locator('.m3-banner').count()) ? await page.locator('.m3-banner').innerText() : 'no banner');
+console.log('landing button, sign-in copy:', await page.getByRole('heading', { name: 'Welcome to Benchstake' }).count());
 console.log('errors:', errors.length ? errors.join(' | ') : 'none');
 await browser.close();

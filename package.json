@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node test/run.js && node test/db.mjs"
+    "test": "node test/ops.mjs && node test/api.mjs && node test/run.js && node test/db.mjs"
   },
   "repository": {
     "type": "git",
@@ -20,7 +20,7 @@
   },
   "homepage": "https://github.com/jayshock94/gradeline#readme",
   "dependencies": {
-    "@supabase/supabase-js": "^2.75.0",
+    "@supabase/supabase-js": "^2.119.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

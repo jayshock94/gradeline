@@ -1,6 +1,6 @@
 /* ===== Benchstake estimating engine: everything derived from the document ===== */
 import { GL } from './gl.js';
-import { M3 } from '../ds/index.js';
+// No design-system or browser imports here: the server (api/) runs this same engine.
 (function () {
   function byId(list) { var m = {}; (list || []).forEach(function (x) { m[x.id] = x; }); return m; }
   function round2(v) { return Math.round(v * 100) / 100; }
@@ -17,7 +17,7 @@ import { M3 } from '../ds/index.js';
     return { laborPerDay: laborH * hours, equipPerDay: equipH * hours, perDay: (laborH + equipH) * hours, people: people, hours: hours, laborPerHour: laborH, equipPerHour: equipH };
   };
 
-  GL.blankEstimate = function () { return { items: [], tasks: [], packages: [], markup: { overhead: 6, profit: 4, bond: 1.2, tax: 0 }, targetMargin: 9, locks: {} }; };
+  GL.blankEstimate = function (defaults) { var d = defaults || {}; var n = function (v, f) { return v == null || isNaN(v) ? f : Number(v); }; return { items: [], tasks: [], packages: [], markup: { overhead: n(d.overhead, 6), profit: n(d.profit, 4), bond: n(d.bond, 1.2), tax: n(d.tax, 0) }, targetMargin: n(d.targetMargin, 9), locks: {} }; };
   // Fill in anything an estimate row is missing (older rows, rows written by other tools) so derive never throws on it.
   GL.normalizeEstimate = function (est) {
     var blank = GL.blankEstimate();
@@ -188,7 +188,12 @@ import { M3 } from '../ds/index.js';
     return { est: est, items: dItems, tasks: dTasks, packages: dPkgs, totals: totals, checks: checks, errors: errors, warnings: warnings, unpriced: unpriced, crewRates: crewRates, bid: bid, multiplier: multiplier };
   };
 
-  GL.fmtMoney = function (v, d) { return M3.fmtMoney(v, d); };
+  GL.fmtMoney = function (v, d) { // same output as the design system's Money
+    if (v == null || v === '' || isNaN(v)) return '';
+    var dec = d == null ? 0 : d, n = Number(v), neg = n < 0;
+    var s = '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+    return neg ? '\u2212' + s : s;
+  };
   GL.fmtNum = function (v, d) { if (v == null || isNaN(v)) return ''; return Number(v).toLocaleString('en-US', { minimumFractionDigits: d || 0, maximumFractionDigits: d != null ? d : 2 }); };
   GL.daysUntil = function (iso) { var d = new Date(iso + 'T00:00:00'); var t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d - t) / 86400000); };
   GL.fmtDate = function (iso) { if (!iso) return ''; var d = new Date(iso + 'T00:00:00'); return isNaN(d) ? String(iso) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };

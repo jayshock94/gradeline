@@ -61,6 +61,19 @@ import * as R from 'react';
   }
   GL.useMenu = useMenu;
 
+  // Grid: a DataGrid that shows a real empty state when there are no rows.
+  // `empty`: { icon, headline, body, action } for "nothing here yet"; `filtered`: { headline, onClear } when a filter or search hid every row.
+  function Grid(p) {
+    var rows = p.rows || [];
+    if (rows.length || (!p.empty && !p.filtered)) return h(M.DataGrid, p);
+    var f = p.filtered, e = p.empty || {};
+    var inner = f && f.active
+      ? h(M.EmptyState, { size: 's', icon: 'filter_alt_off', headline: f.headline || 'No matches', body: f.body || 'Nothing here matches that filter.', action: f.onClear ? h(M.Button, { variant: 'tonal', size: 's', onClick: f.onClear }, f.clearLabel || 'Show all') : null })
+      : h(M.EmptyState, { size: e.size || 's', icon: e.icon || 'inbox', headline: e.headline || 'Nothing here yet', body: e.body, action: e.action });
+    return h('div', { className: 'gl-grid-empty' + (p.className ? ' ' + p.className : ''), role: 'status', 'aria-label': p.label }, inner);
+  }
+  GL.Grid = Grid;
+
   function Section(p) {
     return h('section', { className: 'gl-section' + (p.className ? ' ' + p.className : '') },
       (p.title || p.actions) ? h('div', { className: 'gl-section__head' },

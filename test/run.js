@@ -38,6 +38,10 @@ function makeXlsx() {
     if (u.hostname === 'fonts.googleapis.com' && localFonts) return route.fulfill({ status: 200, contentType: 'text/css', body: fontCss });
     if (FONT_HOSTS.includes(u.hostname)) return route.continue(); // real Google Fonts when no local copies (CI)
     if (u.hostname !== 'local.test') return route.abort();
+    if (u.pathname === '/api/read-quote') { // the AI quote reader, stubbed: prices the first two lines of whatever package was sent
+      const body = JSON.parse(route.request().postData() || '{}'); const lines = (body.package && body.package.lines) || [];
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ quote: { vendor: 'Granite Peak Materials', is_quote: true, lines: lines.slice(0, 2).map((l, i) => ({ item_id: l.itemId, unit_price: 70 + i, qty: i === 0 ? Math.round(l.qty * 0.9) : undefined, quoted_as: l.name + ' @ ' + (70 + i), certain: i === 0 })), unmatched: [{ description: 'Mobilization', amount: 2500 }], exclusions: ['Excludes traffic control'], problems: [] } }) });
+    }
     if (u.pathname.startsWith('/__fonts/')) return route.fulfill({ status: 200, contentType: 'font/woff2', body: fs.readFileSync(path.join(vendor, path.basename(u.pathname))) });
     let p = path.join(DIST, u.pathname);
     if (!fs.existsSync(p) || fs.statSync(p).isDirectory()) p = path.join(DIST, 'index.html'); // SPA fallback, like vercel.json
@@ -56,6 +60,25 @@ function makeXlsx() {
   check(page.url().endsWith('/demo'), 'demo route');
   check(await page.locator('.gl-app').count() === 1, 'app mounted in demo mode');
   await shot('01-bids');
+
+  // new bid: the date and time fields are real pickers, and typing still works
+  await page.getByRole('button', { name: 'New bid' }).first().click(); await page.waitForTimeout(200);
+  const due = page.getByRole('textbox', { name: /Bids due/ });
+  await due.click(); await page.keyboard.type('11/20'); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
+  check((await due.inputValue()) === '11/20/' + new Date().getFullYear(), 'typing 11/20 in Bids due fills in the year');
+  await due.click(); await page.keyboard.press('Control+A'); await page.keyboard.type('nov 32'); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
+  check((await page.getByText(/Use MM\/DD\/YYYY/).count()) === 1 && (await page.getByRole('button', { name: 'Create' }).isDisabled()), 'a bad date shows how to type one and keeps Create off');
+  await page.getByRole('button', { name: 'Choose bids due' }).click(); await page.waitForTimeout(200);
+  check((await page.locator('.gl-picker .m3-date').count()) === 1, 'the calendar icon opens the design-system date picker');
+  await page.locator('.m3-date__day').nth(20).click(); await page.locator('.gl-picker').getByRole('button', { name: 'OK' }).click(); await page.waitForTimeout(200);
+  check(/^\d{1,2}\/21\/\d{4}$/.test(await due.inputValue()), 'picking a day fills the field (' + (await due.inputValue()) + ')');
+  await page.getByRole('button', { name: 'Choose time' }).click(); await page.waitForTimeout(150);
+  await page.getByRole('option', { name: '10:30 AM' }).click(); await page.waitForTimeout(150);
+  check((await page.getByRole('textbox', { name: 'Time' }).inputValue()) === '10:30 AM', 'the clock icon opens a time list and picks 10:30 AM');
+  await page.getByRole('textbox', { name: 'Time' }).fill('3pm'); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
+  check((await page.getByRole('textbox', { name: 'Time' }).inputValue()) === '3:00 PM', 'typing 3pm becomes 3:00 PM');
+  await shot('01b-newbid');
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click(); await page.waitForTimeout(150);
 
   // open the sample bid, edit a quantity, undo, redo
   await page.getByRole('row', { name: /SR-7 Mill/ }).click();
@@ -91,6 +114,15 @@ function makeXlsx() {
 
   // quotes, checks, bid day
   await page.getByRole('tab', { name: 'Quotes' }).click();
+  // the tab badge, the tile and the chips all count the same quotes that are still out
+  const badge = await page.getByRole('tab', { name: 'Quotes' }).locator('.m3-badge').innerText();
+  const allPkgs = await page.locator('.gl-pkg').count();
+  await page.getByRole('button', { name: /Quotes received/ }).click(); await page.waitForTimeout(200);
+  const waitingPkgs = await page.locator('.gl-pkg').count();
+  const waitingChips = await page.locator('.gl-pkg .m3-status', { hasText: 'Waiting on' }).count();
+  check(badge === '2' && waitingPkgs === 2 && waitingChips === 2 && allPkgs > waitingPkgs, 'quotes badge 2 → the tile shows the 2 packages waiting on a quote, each labeled');
+  await page.getByRole('button', { name: /^All$/ }).click(); await page.waitForTimeout(150);
+  check((await page.locator('.gl-pkg').count()) === allPkgs, 'All brings every package back');
   await page.getByRole('button', { name: /Timp Precast ·/ }).click(); await page.waitForTimeout(200);
   check((await page.getByText(/is \$[\d,]+ lower than your pick/).count()) === 1, 'picking a higher quote shows the cheaper one');
   // a phoned-in quote, typed by hand from a company not in the library
@@ -104,6 +136,18 @@ function makeXlsx() {
   check((await plugCells.count()) > 0, 'plug cells on the quotes tab can be edited');
   await plugCells.first().click(); await page.keyboard.press('Control+A'); await page.keyboard.type('123.45'); await page.keyboard.press('Enter'); await page.waitForTimeout(250);
   check((await page.getByText('$123.45').count()) >= 1, 'typing a plug on the quotes tab saves it');
+  // a quote read from a file (the AI reader is stubbed above): the dialog fills in and waits for review
+  const pdf = path.join(__dirname, 'tmp-quote.pdf'); fs.writeFileSync(pdf, '%PDF-1.4 fake quote');
+  await page.locator('.gl-pkg').filter({ hasText: 'HMA 1/2 in. supply' }).locator('input[type=file]').setInputFiles(pdf);
+  await page.waitForTimeout(400);
+  check((await page.getByRole('dialog').getByText(/Read from tmp-quote\.pdf: 1 of 1 item/).count()) === 1, 'quote from file: the dialog says what it read');
+  check((await page.getByRole('dialog').getByRole('combobox').first().inputValue()) !== '__new' && (await page.getByRole('dialog').getByLabel('Unit price').first().inputValue()) === '70', 'quote from file: matched the known vendor and filled the unit price');
+  check((await page.getByRole('dialog').getByText(/Quoted 10,080 TON, bid has 11,200/).count()) === 1, 'quote from file: a quantity mismatch is flagged on the line');
+  check(/Excludes traffic control.*Not matched: Mobilization/.test(await page.getByRole('dialog').getByRole('textbox', { name: 'Notes and exclusions' }).inputValue()), 'quote from file: exclusions and unmatched lines land in the notes');
+  await shot('03b-quote-from-file');
+  await page.getByRole('button', { name: 'Save quote' }).click(); await page.waitForTimeout(300);
+  check((await page.getByText(/Saved the quote from Granite Peak/).count()) === 1, 'quote from file saves like a typed quote');
+  fs.unlinkSync(pdf);
   await shot('03-quotes');
   await page.getByRole('tab', { name: 'Checks' }).click();
   await page.getByRole('button', { name: 'Go to' }).first().click(); await page.waitForTimeout(200);
@@ -195,12 +239,13 @@ function makeXlsx() {
   await page.getByLabel('Project name').fill('Date test');
   await page.getByLabel(/Owner/).fill('UDOT');
   check(await page.getByRole('button', { name: 'Create' }).isDisabled(), 'Create waits for a due date');
-  await page.getByLabel('Bids due').fill('2026-11-20');
-  check(!(await page.getByRole('button', { name: 'Create' }).isDisabled()), 'a date picked in the date field enables Create');
+  const due2 = page.getByRole('textbox', { name: /Bids due/ });
+  await due2.click(); await page.keyboard.type('2026-11-20'); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
+  check(!(await page.getByRole('button', { name: 'Create' }).isDisabled()), 'a date typed in the date field enables Create');
   await page.keyboard.press('Escape'); await page.waitForTimeout(100);
 
   // library: rates from their parts, a crew built from people and machines
-  await page.getByRole('button', { name: 'Library' }).click(); await page.waitForTimeout(200);
+  await page.getByRole('button', { name: 'Library', exact: true }).click(); await page.waitForTimeout(200);
   check((await page.getByRole('tab', { name: 'Crews' }).count()) === 1, 'library renders');
   await page.getByRole('tab', { name: 'Equipment' }).click();
   await page.getByRole('button', { name: 'Add machine' }).click();
@@ -236,6 +281,26 @@ function makeXlsx() {
   await page.getByRole('dialog').getByRole('button', { name: 'Add crew' }).click(); await page.waitForTimeout(200);
   check((await page.getByRole('row', { name: /Test crew/ }).count()) === 1, 'a new crew shows in the library');
   await shot('05b-library');
+  // settings: bid defaults feed a new estimate, company details print on the form
+  await page.getByRole('button', { name: 'Account' }).click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click(); await page.waitForTimeout(300);
+  check((await page.getByText('Bid defaults').count()) === 1, 'settings screen opens from the account menu');
+  check((await page.getByText('https://benchstake.com/api/mcp').count()) === 1, 'settings shows the AI connector address');
+  await page.getByRole('textbox', { name: 'Overhead' }).fill('8'); await page.keyboard.press('Tab'); await page.waitForTimeout(250);
+  await page.getByRole('textbox', { name: 'Contractor license no.' }).fill('UT 123456-5501'); await page.keyboard.press('Enter'); await page.waitForTimeout(250);
+  await shot('05c-settings');
+  await page.getByRole('button', { name: 'Bids', exact: true }).click(); await page.waitForTimeout(200);
+  await page.getByRole('row', { name: /Airport Rd/ }).click(); await page.waitForTimeout(300);
+  await page.getByRole('button', { name: 'Start blank' }).click(); await page.waitForTimeout(300);
+  check((await page.locator('.gl-grid-empty').getByRole('button', { name: 'Paste items' }).count()) === 1, 'an empty sheet shows an empty state with a Paste items action');
+  await shot('05d-empty-sheet');
+  await page.getByRole('tab', { name: 'Bid day' }).click(); await page.waitForTimeout(200);
+  check((await page.getByRole('textbox', { name: 'Overhead' }).inputValue()) === '8', 'a new estimate starts from the overhead default (8%)');
+  await page.getByRole('tab', { name: 'Form' }).click(); await page.waitForTimeout(200);
+  await page.getByRole('radio', { name: 'Crew plan' }).click(); await page.waitForTimeout(150);
+  check((await page.locator('.gl-grid-empty').count()) === 1, 'an empty crew plan shows an empty state');
+  await page.getByRole('radio', { name: 'Bid form' }).click(); await page.waitForTimeout(150);
+  check((await page.getByText(/License UT 123456-5501/).count()) === 1, 'the bid form prints the license number');
   await page.getByRole('button', { name: 'Insights' }).click(); await page.waitForTimeout(200);
   check((await page.getByText('Bids and wins by month').count()) === 1, 'insights renders');
   await page.getByRole('button', { name: 'Account' }).click();
@@ -265,6 +330,12 @@ function makeXlsx() {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(400);
   check((await page.locator('.gl-app').count()) === 1, 'demo state survives a reload');
+
+  // public policy pages Google needs
+  await page.goto('https://local.test/privacy', { waitUntil: 'load' }); await page.waitForTimeout(200);
+  check((await page.locator('h1').innerText()) === 'Privacy policy', 'privacy page opens without signing in');
+  await page.goto('https://local.test/terms', { waitUntil: 'load' }); await page.waitForTimeout(200);
+  check((await page.locator('h1').innerText()) === 'Terms of service', 'terms page opens without signing in');
 
   console.log(errors.length ? '\nFAILURES\n' + errors.join('\n') : '\nall good, no console errors');
   await browser.close();

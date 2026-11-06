@@ -11,15 +11,17 @@ Built on the Gradeline design system (the design system artifact keeps that name
 | Folder | What |
 |---|---|
 | `src/app/` | The app: data model (`calc.js`), screens, the estimate workspace, the two stores (`store-local.js` for the demo, `store-cloud.js` for signed-in companies) |
-| `src/pages/` | Sign-in, first-run company setup, company and team settings |
+| `src/pages/` | Sign-in, first-run company setup, and the company-name and team panels the Settings screen embeds |
 | `src/ds/` | The design system runtime (tokens, components), vendored from the Gradeline design system |
 | `supabase/migrations/` | The database: tables, security rules, live updates, onboarding and save functions |
-| `test/run.js` | End-to-end check of the production build in demo mode |
+| `api/` | Vercel functions: invite email, the MCP server, quote reading, OAuth metadata |
+| `server/` | Code the MCP server shares with the app: the company store and the operations an AI can run |
+| `test/run.js` | End-to-end check of the production build in demo mode (`test/ops.mjs` and `test/api.mjs` cover the server side) |
 
 Two ways to run it:
 
 - **Demo** (`/demo`): a sample company in your browser. No account, nothing to set up.
-- **Cloud** (`/app`): sign in with Google or an emailed link, create your company, invite your team. Everything saves to Supabase, two people can work on one estimate at once, and every change is in a shared history you can undo or jump back to.
+- **Cloud** (`/app`): sign in with an emailed code (or Google or Microsoft once they are switched on), set up your company, invite your team. Everything saves to Supabase, two people can work on one estimate at once, and every change is in a shared history you can undo or jump back to.
 
 ## Run it locally
 
@@ -46,12 +48,12 @@ npm run build && npm test   # production build + headless browser checks
 ### 2. Vercel (hosting)
 
 1. On vercel.com, **Add New › Project › Import** this GitHub repo. Framework preset: **Vite**. Keep the defaults.
-2. **Environment Variables**: add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` with the values from step 1.6.
+2. **Environment Variables**: add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` with the values from step 1.6, `RESEND_API_KEY` for invite emails, and `ANTHROPIC_API_KEY` for reading quotes from files.
 3. Deploy. Every push to `main` deploys again on its own.
 
 ### 3. First sign-in
 
-Open the site, **Sign in**, create your company (choose *Starter rates*, *Sample company* or *Empty*), then **Account › Company and team** to invite people by email. An invited person signs in with that same email and lands in your company.
+Open the site, **Sign in**, give your name and company name, and you land in a sample bid, then **Account › Settings › Team** to invite people by email. An invited person signs in with that same email and lands in your company.
 
 ## Roles
 
@@ -71,6 +73,16 @@ Each company's cost library is one document; each bid has one estimate document.
 - **Spectrum, Vista, Sage 300 CRE**: CSV budget by phase and cost type.
 
 The QuickBooks files follow the documented formats but have not yet been run through a live QuickBooks company. First real import is the test.
+
+## AI
+
+Two ways in, both optional:
+
+- **Quote from file.** On a quote package, *Quote from file* reads a sub's PDF, photo or pasted email into the quote dialog for review (`api/read-quote.js`, Anthropic API). Needs `ANTHROPIC_API_KEY` in Vercel (and optionally `ANTHROPIC_MODEL`). Without the key the button explains it is switched off. The AI only reads the document; prices are saved only when the person taps Save quote.
+- **MCP connector.** `https://benchstake.com/api/mcp` is an MCP server (`api/mcp.js`, tools in `server/ops.js`). People add it to Claude, ChatGPT or any MCP client as a custom connector and sign in with their Benchstake account; every call runs as that user, so roles and row security apply, and every change lands in the history like a change made in the app. Sign-in uses Supabase Auth as the OAuth 2.1 server:
+  1. Supabase dashboard › **Authentication › OAuth Server**: enable it, set the authorization path to `/oauth/consent`, and allow dynamic client registration (that is how Claude and ChatGPT register themselves).
+  2. **Authentication › URL Configuration**: Site URL must be `https://benchstake.com` (the consent page lives at Site URL + `/oauth/consent`).
+  3. `/.well-known/oauth-protected-resource` (served by `api/oauth-metadata.js` through `vercel.json`) tells clients where to sign in. Set `MCP_PUBLIC_ORIGIN` if the site ever moves.
 
 ## Design system
 

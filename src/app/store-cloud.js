@@ -44,12 +44,12 @@ function cursorFromRows(rows) {
 }
 const isRestore = r => !!(r.entry && r.entry.restoreOf != null);
 
-export function useCloudStore({ supabase, orgId, user, name }) {
+export function useCloudStore({ supabase, orgId, user, name, initialUi }) {
   // committed = the latest server state we know (rows + versions). The ref is updated synchronously with the state.
   const committed = R.useRef({ loaded: false, error: null, library: null, bids: {}, estimates: {} });
   const [state, setStateRaw] = R.useState(committed.current);
   const commit = R.useCallback(fn => { const next = typeof fn === 'function' ? fn(committed.current) : fn; committed.current = next; setStateRaw(next); }, []);
-  const [ui, setUiState] = R.useState(() => loadUi(orgId));
+  const [ui, setUiState] = R.useState(() => ({ ...loadUi(orgId), ...(initialUi || {}) }));
   const uiRef = R.useRef(ui); uiRef.current = ui;
   const [hist, setHist] = R.useState({ scope: null, rows: [], cursor: -1, loading: false });
   const histRef = R.useRef(hist); histRef.current = hist;

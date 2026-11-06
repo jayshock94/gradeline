@@ -122,8 +122,11 @@ import * as R from 'react';
           } }, ui.expanded.__all === false ? 'Expand all' : 'Collapse all')),
         h('div', { className: 'gl-toolbar__group' },
           h(M.SegmentedButton, { density: 'dense', label: 'Columns', value: view, onChange: function (v) { api.ui({ sheetView: v }); }, segments: [{ value: 'all', label: 'All' }, { value: 'costs', label: 'Costs' }, { value: 'pricing', label: 'Pricing' }] }))),
-      d.errors ? h(M.Banner, { tone: 'error', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { api.ui({ tab: 'checks' }); } }, 'Show me') }, d.unpriced ? d.unpriced + (d.unpriced > 1 ? ' items need a price before this bid can go out.' : ' item needs a price before this bid can go out.') : d.errors + (d.errors > 1 ? ' checks must clear before this bid can go out.' : ' check must clear before this bid can go out.')) : null,
-      h(M.DataGrid, { label: 'Estimate sheet', columns: cols, rows: rows, footer: true, density: 'dense', emptyText: 'No pay items yet. Add one or paste a list.',
+      d.errors && d.items.length ? h(M.Banner, { tone: 'error', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { api.ui({ tab: 'checks' }); } }, 'Show me') }, d.unpriced ? d.unpriced + (d.unpriced > 1 ? ' items need a price before this bid can go out.' : ' item needs a price before this bid can go out.') : d.errors + (d.errors > 1 ? ' checks must clear before this bid can go out.' : ' check must clear before this bid can go out.')) : null,
+      h(GL.Grid, { label: 'Estimate sheet', columns: cols, rows: rows, footer: true, density: 'dense',
+        empty: { size: 'm', icon: 'post_add', headline: 'No pay items yet', body: 'Paste the owner\'s item list from a spreadsheet, or add pay items one at a time. Each item gets priced with crew, material and sub tasks.', action: h(Frag, null,
+          h(M.Button, { icon: 'upload_file', onClick: function () { p.openDialog({ kind: 'import' }); } }, 'Paste items'),
+          h(M.Button, { variant: 'outlined', icon: 'add', onClick: function () { p.openDialog({ kind: 'item' }); } }, 'Add pay item')) },
         onToggle: function (r) { api.ui(function (u) { var ex = Object.assign({}, u.expanded); ex[r.itemId] = !r.expanded; return { expanded: ex }; }); },
         onSelect: function (r) { api.ui({ selectedItemId: r.itemId, paneTab: 'summary' }); },
         onEdit: onEdit }),
@@ -138,7 +141,7 @@ import * as R from 'react';
       api.update(function (doc) { var e = doc.estimates[doc.currentBidId]; var pk = e.packages.find(function (x) { return x.id === pkg.id; }); pk.selectedQuoteId = quoteId; },
         { title: quoteId === 'self' ? 'Chose self-perform for ' + pkg.name : quoteId ? 'Accepted ' + (q.vendor ? q.vendor.name : 'a quote') + ' for ' + pkg.name : 'Cleared the pick for ' + pkg.name, detail: quoteId === 'self' ? GL.fmtMoney(pkg.selfTotal) : q && q.total != null ? GL.fmtMoney(q.total) : 'back to plug', icon: 'request_quote' });
     }
-    function enter(pkg, quoteId) { p.openDialog({ kind: 'quote', packageId: pkg.id, quoteId: quoteId || null }); }
+    function enter(pkg, quoteId, read) { p.openDialog({ kind: 'quote', packageId: pkg.id, quoteId: quoteId || null, read: read || null }); }
     function setPlug(pkg, itemId, value) {
       if (d.bid.status === 'submitted') { p.toast('This bid was submitted. Reopen it from Bid day to change it.'); return; }
       if (value == null || value === '' || isNaN(value) || value < 0) { p.toast('Enter a plug price of zero or more.'); return; }
@@ -149,14 +152,26 @@ import * as R from 'react';
         if (t) t.plug = value; else e.tasks.push({ id: GL.uid('T'), itemId: itemId, name: pkg.name + ' (sub)', type: 'sub', packageId: pkg.id, plug: value });
       }, { title: 'Set plug on ' + GL.itemLabel(line && line.item), detail: GL.fmtMoney(value, 2) + ' / ' + (line ? line.unit : ''), icon: 'request_quote' });
     }
+    // The same numbers the tab badge and the tiles show, so each one can open exactly the packages it counts
+    var waiting = d.packages.filter(function (x) { return x.quotes.some(function (q) { return q.status === 'pending'; }); });
+    var unpicked = d.packages.filter(function (x) { return !x.selected && !x.selfSelected; });
+    var pendingN = d.packages.reduce(function (a, x) { return a + x.quotes.filter(function (q) { return q.status === 'pending'; }).length; }, 0);
+    var receivedN = d.packages.reduce(function (a, x) { return a + x.quotes.filter(function (q) { return q.status === 'received'; }).length; }, 0);
+    var filter = p.ui.quoteFilter || 'all';
+    if (filter === 'waiting' && !waiting.length) filter = 'all';
+    var shown = filter === 'waiting' ? waiting : filter === 'unpicked' ? unpicked : d.packages;
+    function setFilter(f) { api.ui({ quoteFilter: f }); }
+    var filters = [['all', 'All', d.packages.length], ['waiting', 'Waiting on quotes', waiting.length], ['unpicked', 'Nothing picked', unpicked.length]];
     return h('div', { className: 'gl-quotes' },
       h('div', { className: 'gl-quotes__head' },
         h('div', { className: 'gl-tiles' },
-          h(M.StatTile, { size: 's', label: 'Packages', value: String(d.packages.length), supporting: d.packages.filter(function (x) { return x.selected || x.selfSelected; }).length + ' picked' }),
-          h(M.StatTile, { size: 's', label: 'Quotes received', value: String(d.packages.reduce(function (a, x) { return a + x.quotes.filter(function (q) { return q.status === 'received'; }).length; }, 0)), supporting: d.packages.reduce(function (a, x) { return a + x.quotes.filter(function (q) { return q.status === 'pending'; }).length; }, 0) + ' still out', tone: 'warning' }),
+          h(M.StatTile, { size: 's', label: 'Packages', value: String(d.packages.length), supporting: (d.packages.length - unpicked.length) + ' picked' + (unpicked.length ? ', ' + unpicked.length + ' still on plug' : ''), onClick: unpicked.length ? function () { setFilter('unpicked'); } : undefined }),
+          h(M.StatTile, { size: 's', label: 'Quotes received', value: String(receivedN), supporting: pendingN ? pendingN + ' still out' : 'all in', tone: pendingN ? 'warning' : 'success', onClick: pendingN ? function () { setFilter('waiting'); } : undefined }),
           h(M.StatTile, { size: 's', label: 'Subcontract total', value: money(d.totals.sub), supporting: (d.totals.direct ? Math.round(d.totals.sub / d.totals.direct * 100) : 0) + '% of direct cost' })),
         h(M.Button, { variant: 'filled', icon: 'add', size: 's', onClick: function () { p.openDialog({ kind: 'package' }); } }, 'New quote package')),
-      d.packages.length ? d.packages.map(function (pkg) { return h(PackageCard, { key: pkg.id, pkg: pkg, d: d, pick: pick, enter: enter, setPlug: setPlug, highlight: p.focusPackageId === pkg.id }); })
+      d.packages.length ? h('div', { className: 'm3-row', role: 'group', 'aria-label': 'Show packages' }, filters.map(function (f) { return h(M.Chip, { key: f[0], variant: 'filter', label: f[1] + (f[0] === 'all' ? '' : ' · ' + f[2]), selected: filter === f[0], disabled: !f[2], onClick: function () { setFilter(f[0]); } }); })) : null,
+      shown.length ? shown.map(function (pkg) { return h(PackageCard, { key: pkg.id, pkg: pkg, d: d, pick: pick, enter: enter, setPlug: setPlug, highlight: p.focusPackageId === pkg.id }); })
+        : d.packages.length ? h(M.EmptyState, { size: 's', icon: 'task_alt', headline: filter === 'unpicked' ? 'Every package has a pick' : 'No packages match', body: 'Show all packages to keep working on quotes.', action: h(M.Button, { variant: 'tonal', onClick: function () { setFilter('all'); } }, 'Show all') })
         : h(M.EmptyState, { icon: 'request_quote', headline: 'No quote packages yet', body: 'Group the pay items a sub or supplier will price, then type in each quote as it comes in by phone or email. Quotes line up side by side against your plug.', action: h(M.Button, { icon: 'add', onClick: function () { p.openDialog({ kind: 'package' }); } }, 'New quote package') }));
   }
 
@@ -185,10 +200,20 @@ import * as R from 'react';
     var rows = pkg.lines.map(function (l) { var t = d.est.tasks.find(function (x) { return x.packageId === pkg.id && x.itemId === l.itemId; }); return { id: l.itemId, itemId: l.itemId, code: l.item ? l.item.code : '', label: l.item ? l.item.name : '', qty: l.qty, unit: l.unit, plug: t ? t.plug : null }; })
       .concat([{ id: 'total', kind: 'total', label: 'Package total', plug: pkg.plugTotal }]);
     var bestNote = pkg.best && pkg.selected && pkg.best.id !== pkg.selected.id && pkg.selected.total != null ? pkg.best.vendor.name + ' is ' + GL.fmtMoney(pkg.selected.total - pkg.best.total) + ' lower than your pick.' : null;
+    var pending = pkg.quotes.filter(function (q) { return q.status === 'pending'; });
+    var picked = pkg.selfSelected ? 'Self-perform' : pkg.selected ? (pkg.selected.vendor ? pkg.selected.vendor.name : 'a quote') : null;
     return h('div', { className: 'gl-pkg' + (p.highlight ? ' is-focus' : '') },
       h('div', { className: 'gl-pkg__head' },
-        h('div', null, h('h3', { className: 'gl-pkg__title' }, pkg.name), h('div', { className: 'gl-pkg__meta body-small' }, received.length + ' of ' + pkg.quotes.length + ' quote' + (pkg.quotes.length === 1 ? '' : 's') + ' in' + (pkg.best ? ' · low ' + pkg.best.vendor.name + ' ' + GL.fmtMoney(pkg.best.total) : '') + (pkg.sentAt ? ' · started ' + GL.fmtDate(pkg.sentAt) : ''))),
+        h('div', { className: 'gl-pkg__titles' },
+          h('div', { className: 'gl-pkg__titlerow' },
+            h('h3', { className: 'gl-pkg__title' }, pkg.name),
+            // the chips say what the tab badge and the tiles are counting
+            // names up to two vendors; past that the count reads better than a list
+            pending.length ? h(M.StatusChip, { status: 'pending', label: 'Waiting on ' + (pending.length > 2 ? pending.length + ' quotes' : pending.map(function (q) { return q.vendor ? q.vendor.name : 'a vendor'; }).join(' and ')), title: pending.map(function (q) { return q.vendor ? q.vendor.name : 'a vendor'; }).join(', ') + ': type the quote in when it arrives' }) : null,
+            picked ? null : h(M.StatusChip, { status: 'info', icon: 'radio_button_unchecked', label: 'On plug, nothing picked' })),
+          h('div', { className: 'gl-pkg__meta body-small' }, received.length + ' of ' + pkg.quotes.length + ' quote' + (pkg.quotes.length === 1 ? '' : 's') + ' in' + (pkg.best ? ' · low ' + pkg.best.vendor.name + ' ' + GL.fmtMoney(pkg.best.total) : '') + (picked ? ' · using ' + picked : '') + (pkg.sentAt ? ' · started ' + GL.fmtDate(pkg.sentAt) : ''))),
         h('div', { className: 'gl-pkg__actions' },
+          h('label', { className: 'm3-btn m3-btn--outlined m3-btn--xs m3-btn--round gl-filebtn', title: 'Read a quote from a PDF or a photo' }, h(M.Icon, { name: 'document_scanner', size: 18 }), ' Quote from file', h('input', { type: 'file', accept: '.pdf,image/*', 'aria-label': 'Read a quote for ' + pkg.name + ' from a PDF or photo', onChange: function (e) { var file = e.target.files && e.target.files[0]; e.target.value = ''; if (file) p.enter(pkg, null, { file: file }); }, style: { position: 'absolute', opacity: 0, width: 1, height: 1 } })),
           h(M.Button, { variant: 'tonal', size: 'xs', icon: 'add', onClick: function () { p.enter(pkg, null); } }, 'Add quote'))),
       bestNote ? h(M.Banner, { tone: 'info', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { p.pick(pkg, pkg.best.id); } }, 'Use ' + pkg.best.vendor.name) }, bestNote) : null,
       h(M.DataGrid, { label: 'Quotes for ' + pkg.name, columns: cols, rows: rows, density: 'dense', onEdit: function (row, col, value) { if (col.key === 'plug' && row.kind !== 'total') p.setPlug(pkg, row.itemId, value); } }),
@@ -339,7 +364,7 @@ import * as R from 'react';
       body = h('div', { className: 'gl-paper' },
         h('div', { className: 'gl-paper__head' },
           h('div', null, h('div', { className: 'gl-paper__eyebrow' }, 'Schedule of bid items'), h('h2', { className: 'gl-paper__title' }, d.bid.name), h('div', { className: 'gl-paper__meta' }, 'Owner: ' + d.bid.owner + ' · Bids due ' + GL.fmtDate(d.bid.due) + ' at ' + d.bid.dueTime)),
-          h('div', { className: 'gl-paper__bidder' }, h('div', null, 'Bidder: ' + (p.company || '')), h('div', null, 'Estimator: ' + d.bid.estimator), h('div', null, 'Prepared ' + today))),
+          h('div', { className: 'gl-paper__bidder' }, h('div', null, 'Bidder: ' + (p.company || '') + (p.companyInfo && p.companyInfo.address ? ', ' + p.companyInfo.address : '') + (p.companyInfo && p.companyInfo.phone ? ' · ' + p.companyInfo.phone : '') + (p.companyInfo && p.companyInfo.license ? ' · License ' + p.companyInfo.license : '')), h('div', null, 'Estimator: ' + d.bid.estimator), h('div', null, 'Prepared ' + today))),
         h('table', { className: 'gl-paper__table' },
           h('thead', null, h('tr', null, h('th', null, 'Item'), h('th', null, 'Description'), h('th', { className: 'num' }, 'Quantity'), h('th', null, 'Unit'), h('th', { className: 'num' }, 'Unit price'), h('th', { className: 'num' }, 'Amount'))),
           h('tbody', null, d.items.map(function (it) { return h('tr', { key: it.id }, h('td', null, it.code), h('td', null, it.name), h('td', { className: 'num' }, GL.fmtNum(it.qty)), h('td', null, it.unit), h('td', { className: 'num' }, GL.fmtMoney(it.unitPrice, 2)), h('td', { className: 'num' }, GL.fmtMoney(it.ext, 2))); })),
@@ -357,7 +382,7 @@ import * as R from 'react';
         h('div', { className: 'gl-crewplan__bar' },
           h('div', { className: 'body-medium' }, 'For the superintendent and foremen: what to build, with which crew, how fast. Dollar figures are hidden unless you turn them on.'),
           h(M.Switch, { label: 'Show dollars', checked: !!ui.showDollarsCrew, onChange: function (v) { api.ui({ showDollarsCrew: v }); } })),
-        h(M.DataGrid, { label: 'Crew plan', density: 'standard', rows: rows, columns: [
+        h(GL.Grid, { label: 'Crew plan', density: 'standard', rows: rows, empty: { icon: 'groups', headline: 'No crew work yet', body: 'Crew tasks on the Sheet show up here as a plan for the field: what to build, which crew, how fast.' }, columns: [
           { key: 'label', header: 'Work', width: 320, render: function (r) { return r.kind === 'group' ? r.label : h('span', { style: { paddingLeft: 20 } }, r.label); } },
           { key: 'qty', header: 'Quantity', width: 120 }, { key: 'crew', header: 'Crew', width: 160 }, { key: 'production', header: 'Production', width: 160 },
           { key: 'days', header: 'Crew days', type: 'number', decimals: 1, width: 100 }, { key: 'people', header: 'People', width: 90 },
@@ -370,7 +395,7 @@ import * as R from 'react';
           h(GL.Select, { label: 'Accounting system', value: sys, options: Object.keys(systems).map(function (k) { return { value: k, label: systems[k] }; }), onChange: function (v) { api.ui({ exportSystem: v }); } }),
           h(M.Button, { variant: 'filled', icon: 'download', onClick: function () { p.openDialog({ kind: 'export' }); } }, 'Export budget'),
           h('div', { className: 'body-small gl-dim' }, sys === 'qbd' || sys === 'qbo' ? 'QuickBooks gets an estimate: one line per pay item with quantity, unit price and amount. The cost split rides along for job costing.' : 'Phase codes come from the pay item codes; cost types map to ' + systems[sys] + "'s labor, equipment, material, subcontract and other.")),
-        h(M.DataGrid, { label: 'Budget export preview', density: 'dense', zebra: true, rows: d.items.map(function (it) { return { id: it.id, phase: it.code, desc: it.name, qty: it.qty, unit: it.unit, labor: it.labor || null, equipment: it.equipment || null, material: it.material || null, sub: it.sub || null, other: it.other || null, total: it.direct }; }), footer: true, columns: [
+        h(GL.Grid, { label: 'Budget export preview', density: 'dense', zebra: true, empty: { icon: 'account_balance', headline: 'Nothing to export yet', body: 'Pay items with a price show up here, one row per item, in the layout your accounting system expects.' }, rows: d.items.map(function (it) { return { id: it.id, phase: it.code, desc: it.name, qty: it.qty, unit: it.unit, labor: it.labor || null, equipment: it.equipment || null, material: it.material || null, sub: it.sub || null, other: it.other || null, total: it.direct }; }), footer: true, columns: [
           { key: 'phase', header: sys === 'qbo' || sys === 'qbd' ? 'Item' : 'Phase', width: 90 }, { key: 'desc', header: 'Description', width: 260 }, { key: 'qty', header: 'Qty', type: 'number', decimals: 2, width: 90, render: function (r) { return GL.fmtNum(r.qty, r.qty % 1 ? 2 : 0); } }, { key: 'unit', header: 'UM', width: 60, align: 'center' },
           { key: 'labor', header: sys === 'sage' ? 'L (1)' : 'Labor', type: 'money', category: 'labor', placeholder: '–', footer: d.totals.labor }, { key: 'equipment', header: sys === 'sage' ? 'E (2)' : 'Equipment', type: 'money', category: 'equipment', placeholder: '–', footer: d.totals.equipment },
           { key: 'material', header: sys === 'sage' ? 'M (3)' : 'Material', type: 'money', category: 'material', placeholder: '–', footer: d.totals.material }, { key: 'sub', header: sys === 'sage' ? 'S (4)' : 'Subcontract', type: 'money', category: 'sub', placeholder: '–', footer: d.totals.sub },
