@@ -314,6 +314,18 @@ function makeXlsx() {
   check((await page.locator('.m3-navbar').count()) === 1, 'phone width shows the bottom navigation bar');
   check(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'no horizontal page scroll at phone width');
   await shot('07-phone');
+  // every table on a phone: the page itself never scrolls sideways, and the name column leaves room for the numbers
+  const phoneFit = async (sel) => page.evaluate((sel) => { const c = document.querySelector('.gl-content') || document.documentElement; const g = document.querySelector(sel); const th = g && g.querySelector('thead th'); return { over: c.scrollWidth - c.clientWidth, first: th ? th.getBoundingClientRect().width / g.getBoundingClientRect().width : 0, inner: g ? g.scrollHeight - g.clientHeight : -1 }; }, sel);
+  await page.locator('.m3-navbar').getByRole('button', { name: 'Library' }).click(); await page.waitForTimeout(300);
+  let fit = await phoneFit('.gl-library .m3-grid');
+  check(fit.over <= 1 && fit.first > 0 && fit.first < 0.6, 'phone: the library stays inside the screen and its tables scroll on their own');
+  await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
+  await page.getByRole('row', { name: /SR-7 Mill/ }).click(); await page.waitForTimeout(400);
+  await page.getByRole('tab', { name: /Sheet/ }).click(); await page.waitForTimeout(300);
+  await shot('07b-phone-sheet');
+  fit = await phoneFit('.gl-sheet > .m3-grid');
+  check(fit.over <= 1 && fit.first > 0 && fit.first < 0.6, 'phone: the sheet shows numbers next to the pay item column (' + JSON.stringify(fit) + ')');
+  check(fit.inner <= 1, 'phone: the sheet scrolls with the page, not inside a small box');
 
   // open another bid, undo, then edit: the edit stays on the bid on screen and nothing crashes
   await page.setViewportSize({ width: 1440, height: 900 }); await page.waitForTimeout(200);
