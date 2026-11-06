@@ -15,8 +15,9 @@ check(sum.items.length > 10 && sum.totals.bid_total > 1000000 && sum.packages.le
 check(sum.packages.some(p => p.quotes.some(q => q.status === 'pending')), 'get_bid shows quotes still out');
 
 // a new bid with pay items, a package, a quote, a pick, a lock and markup
-const c = ops.createBid(doc, { name: 'Test job', owner: 'Test owner', due: '2026-12-01' }, 'Maya R.');
+const c = ops.createBid(doc, { name: 'Test job', owner: 'Test owner', due: '2026-12-01', due_time: '14:00' }, 'Maya R.');
 check(c.id && doc.bids.some(b => b.id === c.id && b.status === 'draft'), 'create_bid adds a draft bid');
+check(doc.bids.find(b => b.id === c.id).dueTime === '2:00 PM', 'create_bid turns a 24-hour due time into the app\'s format');
 ops.addPayItems(doc, { bid: c.id, items: [{ code: '02316', name: 'Roadway excavation', qty: 1000, unit: 'cy' }, { code: '02741', name: 'HMA', qty: 500, unit: 'TON' }] });
 check(doc.estimates[c.id].items.length === 2 && doc.estimates[c.id].items[0].unit === 'CY', 'add_pay_items starts the estimate and uppercases units');
 ops.setQuantity(doc, { bid: 'Test job', item: '02316', qty: 1200 });
@@ -57,6 +58,10 @@ ops.removeTask(doc, { bid: sw.id, item: '1', task: crewName });
 check(doc.estimates[sw.id].tasks.length === 1, 'remove_task removes it');
 
 // editing and cleaning up
+ops.updateBid(doc, { bid: sw.id, status: 'submitted' });
+check(doc.bids.find(b => b.id === sw.id).submittedAt === GL.today(), 'update_bid stamps the submitted date, like the app');
+ops.updateBid(doc, { bid: sw.id, status: 'in-progress' });
+check(doc.bids.find(b => b.id === sw.id).submittedAt === undefined, 'reopening a bid clears the submitted date');
 ops.updateBid(doc, { bid: sw.id, status: 'lost', low_bid: 9800 });
 check(doc.bids.find(b => b.id === sw.id).status === 'lost' && doc.bids.find(b => b.id === sw.id).lowBid === 9800, 'update_bid marks a bid lost with the low bid');
 ops.updateTask(doc, { bid: sw.id, item: '1', task: 'Sewer line', cost_per_unit: 6 });

@@ -31,8 +31,7 @@ import { GL } from './gl.js';
   // A local YYYY-MM-DD (toISOString would give tomorrow's date in the evening, US time)
   GL.today = function () { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   GL.validDate = function (s) { if (!/^\d{4}-\d{2}-\d{2}$/.test(s || '')) return false; var d = new Date(s + 'T00:00:00'); return !isNaN(d) && d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') === s; };
-  // Clock times: the app stores "2:00 PM"; <input type="time"> speaks "14:00"
-  GL.time24 = function (t) { var m = /^(\d{1,2}):(\d{2})\s*([AP]M)?$/i.exec(String(t || '').trim()); if (!m) return ''; if (!m[3]) return String(m[1]).padStart(2, '0') + ':' + m[2]; var hh = Number(m[1]) % 12; if (m[3] && m[3].toUpperCase() === 'PM') hh += 12; if (!m[3] && Number(m[1]) === 12) hh = 12; return String(hh).padStart(2, '0') + ':' + m[2]; };
+  // Clock times: the app stores "2:00 PM"; this turns a 24-hour "14:00" into that, or '' when it can't read it
   GL.fmtTime = function (t) { var m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim()); if (!m) return /^\d{1,2}:\d{2}\s*[AP]M$/i.test(t || '') ? String(t).trim().toUpperCase() : ''; var hh = Number(m[1]); return ((hh % 12) || 12) + ':' + m[2] + ' ' + (hh >= 12 ? 'PM' : 'AM'); };
   // Short label for a pay item in messages: code plus name, never the code alone ("1" means nothing to a reader)
   GL.itemLabel = function (it, max) { if (!it) return ''; var n = String(it.name || ''); max = max || 32; if (n.length > max) n = n.slice(0, max - 1) + '…'; return it.code ? it.code + ' ' + n : n; };
@@ -201,7 +200,7 @@ import { GL } from './gl.js';
     if (['won', 'lost', 'no-bid', 'submitted'].indexOf(bid.status) >= 0) return null;
     var n = GL.daysUntil(bid.due);
     if (n < 0) return { status: 'overdue', label: 'Past due' };
-    if (n === 0) return { status: 'due-soon', label: 'Due today ' + bid.dueTime };
+    if (n === 0) return { status: 'due-soon', label: 'Due today' + (bid.dueTime ? ' ' + bid.dueTime : '') };
     if (n <= 7) return { status: 'due-soon', label: 'Due in ' + n + ' day' + (n > 1 ? 's' : '') };
     return null;
   };

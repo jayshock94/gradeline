@@ -180,7 +180,7 @@ import * as R from 'react';
     var received = pkg.quotes.filter(function (q) { return q.status === 'received'; });
     var cols = [{ key: 'label', header: 'Line', width: 260, render: function (r) { return r.kind === 'total' ? 'Package total' : h('span', { className: 'gl-itemcell' }, h('span', { className: 'gl-itemcode' }, r.code), h('span', { className: 'gl-itemname' }, r.label)); } },
       { key: 'qty', header: 'Qty', type: 'number', width: 90, render: function (r) { return r.kind === 'total' ? '' : GL.fmtNum(r.qty) + ' ' + r.unit; } },
-      { key: 'plug', header: 'Plug', hint: 'your price until a quote is picked', type: 'money', decimals: 2, width: 110, editable: function (r) { return r.kind !== 'total'; }, placeholder: '–' }];
+      { key: 'plug', header: 'Plug', hint: 'until a quote is picked', type: 'money', decimals: 2, width: 110, editable: function (r) { return r.kind !== 'total'; }, placeholder: '–' }];
     pkg.quotes.forEach(function (q) {
       var sel = pkg.selectedQuoteId === q.id;
       cols.push({ key: q.id, type: 'money', decimals: 2, width: 170, header: h('span', { className: 'gl-qhead' + (sel ? ' is-selected' : '') }, h('span', { className: 'gl-qhead__name' }, q.vendor ? q.vendor.name : 'Vendor'), h('span', { className: 'gl-qhead__row' }, h(M.StatusChip, { status: sel ? 'selected' : q.status, label: q.lump != null && q.status === 'received' && !sel ? 'Lump sum' : undefined, size: 's' }), h(M.IconButton, { icon: q.status === 'pending' ? 'edit_note' : 'edit', label: (q.status === 'pending' ? 'Enter quote from ' : 'Edit quote from ') + (q.vendor ? q.vendor.name : 'vendor'), size: 'xs', onClick: function () { p.enter(pkg, q.id); } }))),
@@ -376,7 +376,7 @@ import * as R from 'react';
         var crewTasks = it.tasks.filter(function (t) { return t.type === 'crew'; });
         if (!crewTasks.length) return;
         rows.push({ id: it.id, kind: 'group', label: it.code + ' ' + it.name, qty: GL.fmtNum(it.qty) + ' ' + it.unit, crew: '', production: '', days: crewTasks.reduce(function (a, t) { return a + t.days; }, 0), people: '', cost: it.direct });
-        crewTasks.forEach(function (t) { rows.push({ id: t.id, label: t.name, qty: '', crew: t.crewName, production: GL.fmtNum(t.production, t.production < 10 ? 2 : 0) + ' ' + t.unit + '/day', days: t.days, people: t.people + ' people', cost: t.labor + t.equipment, depth: 1 }); });
+        crewTasks.forEach(function (t) { rows.push({ id: t.id, label: t.name, qty: '', crew: t.crewName || '—', production: t.production > 0 ? GL.fmtNum(t.production, t.production < 10 ? 2 : 0) + ' ' + t.unit + '/day' : '', days: t.days, people: t.people ? t.people + ' people' : '', cost: t.labor + t.equipment, depth: 1 }); });
       });
       body = h('div', { 'data-money': ui.showDollarsCrew ? undefined : 'hidden', className: 'gl-crewplan' },
         h('div', { className: 'gl-crewplan__bar' },

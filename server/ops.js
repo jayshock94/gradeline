@@ -46,6 +46,8 @@ function estimateOf(doc, bid) {
 }
 function needs(v, what) { if (v == null || v === '' || (typeof v === 'number' && isNaN(v))) throw new Error(what + ' is required.'); return v; }
 function num(v, what) { const n = Number(v); if (v == null || v === '' || isNaN(n)) throw new Error(what + ' must be a number.'); return n; }
+// The app stores times as "2:00 PM"; an AI often sends "14:00". Normalize when we can, keep the words when we can't.
+function normTime(v) { const t = String(v == null ? '' : v).trim(); return t ? (GL.fmtTime(t) || t) : ''; }
 
 // ---------- reads ----------
 export function listBids(doc) {
@@ -90,8 +92,9 @@ export function createBid(draft, a, who) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(a.due || '')) throw new Error('due must be a date like 2026-11-20.');
   const id = uid('B');
   const dd = bidDefaults(draft);
-  draft.bids.push({ id, name: String(name).trim(), owner: String(owner).trim(), type: a.type === 'private' ? 'private' : 'public', due: a.due, dueTime: a.due_time || dd.dueTime, estimator: a.estimator || who || '', status: 'draft', location: a.location || '', note: a.note || '' });
-  return { entry: { title: 'Created bid ' + name, detail: 'due ' + GL.fmtDate(a.due), icon: 'post_add' }, say: 'Created bid "' + name + '" (id ' + id + '), due ' + a.due + ' at ' + (a.due_time || dd.dueTime) + '. It has no pay items yet.', id };
+  const dueTime = normTime(a.due_time) || dd.dueTime;
+  draft.bids.push({ id, name: String(name).trim(), owner: String(owner).trim(), type: a.type === 'private' ? 'private' : 'public', due: a.due, dueTime, estimator: a.estimator || who || '', status: 'draft', location: a.location || '', note: a.note || '' });
+  return { entry: { title: 'Created bid ' + name, detail: 'due ' + GL.fmtDate(a.due), icon: 'post_add' }, say: 'Created bid "' + name + '" (id ' + id + '), due ' + a.due + ' at ' + dueTime + '. It has no pay items yet.', id };
 }
 
 export function addPayItems(draft, a) {
@@ -246,10 +249,17 @@ export function updateBid(draft, a) {
   const bid = findBid(draft, a.bid);
   const changes = [];
   const setText = (k, key, label) => { if (a[k] != null) { bid[key] = String(a[k]).trim(); changes.push(label); } };
-  setText('name', 'name', 'name'); setText('owner', 'owner', 'owner'); setText('location', 'location', 'location'); setText('estimator', 'estimator', 'estimator'); setText('note', 'note', 'note'); setText('due_time', 'dueTime', 'due time');
+  setText('name', 'name', 'name'); setText('owner', 'owner', 'owner'); setText('location', 'location', 'location'); setText('estimator', 'estimator', 'estimator'); setText('note', 'note', 'note');
+  if (a.due_time != null) { bid.dueTime = normTime(a.due_time) || bidDefaults(draft).dueTime; changes.push('due time ' + bid.dueTime); }
   if (a.due != null) { if (!/^\d{4}-\d{2}-\d{2}$/.test(a.due)) throw new Error('due must be a date like 2026-11-20.'); bid.due = a.due; changes.push('due date'); }
   if (a.type != null) { if (!['public', 'private'].includes(a.type)) throw new Error('type is public or private.'); bid.type = a.type; changes.push('work type'); }
-  if (a.status != null) { if (!STATUSES.includes(a.status)) throw new Error('status is one of ' + STATUSES.join(', ') + '.'); bid.status = a.status; changes.push('status ' + a.status); }
+  if (a.status != null) {
+    if (!STATUSES.includes(a.status)) throw new Error('status is one of ' + STATUSES.join(', ') + '.');
+    bid.status = a.status; changes.push('status ' + a.status);
+    // same bookkeeping as the app's Edit bid dialog: submitted gets a date; leaving submitted/won/lost clears it
+    if (a.status === 'submitted' && !bid.submittedAt) bid.submittedAt = GL.today();
+    if (!['submitted', 'won', 'lost'].includes(a.status)) delete bid.submittedAt;
+  }
   if (a.submitted_total != null) { bid.total = num(a.submitted_total, 'submitted_total'); changes.push('submitted total'); }
   if (a.low_bid != null) { bid.lowBid = num(a.low_bid, 'low_bid'); changes.push('low bid'); }
   if (!changes.length) throw new Error('Nothing to change.');
