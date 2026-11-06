@@ -87,6 +87,7 @@ import * as R from 'react';
     }
 
     function onEdit(row, col, value) {
+      if (d.bid.status === 'submitted') { p.toast('This bid was submitted. Reopen it from Bid day to change it.'); return; }
       if (col.key === 'unitPrice' && row.rowType === 'item' && (value == null || value === '')) { var cur = d.items.find(function (i) { return i.id === row.itemId; }); if (cur && cur.locked) p.toggleLock(row.itemId); return; }
       if (value == null || value === '' || isNaN(value)) return;
       if (value < 0) { p.toast('Numbers here cannot be negative.'); return; }
@@ -121,7 +122,7 @@ import * as R from 'react';
           } }, ui.expanded.__all === false ? 'Expand all' : 'Collapse all')),
         h('div', { className: 'gl-toolbar__group' },
           h(M.SegmentedButton, { density: 'dense', label: 'Columns', value: view, onChange: function (v) { api.ui({ sheetView: v }); }, segments: [{ value: 'all', label: 'All' }, { value: 'costs', label: 'Costs' }, { value: 'pricing', label: 'Pricing' }] }))),
-      d.errors ? h(M.Banner, { tone: 'error', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { api.ui({ tab: 'checks' }); } }, 'Show me') }, d.errors + (d.errors > 1 ? ' items need a price before this bid can go out.' : ' item needs a price before this bid can go out.')) : null,
+      d.errors ? h(M.Banner, { tone: 'error', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { api.ui({ tab: 'checks' }); } }, 'Show me') }, d.unpriced ? d.unpriced + (d.unpriced > 1 ? ' items need a price before this bid can go out.' : ' item needs a price before this bid can go out.') : d.errors + (d.errors > 1 ? ' checks must clear before this bid can go out.' : ' check must clear before this bid can go out.')) : null,
       h(M.DataGrid, { label: 'Estimate sheet', columns: cols, rows: rows, footer: true, density: 'dense', emptyText: 'No pay items yet. Add one or paste a list.',
         onToggle: function (r) { api.ui(function (u) { var ex = Object.assign({}, u.expanded); ex[r.itemId] = !r.expanded; return { expanded: ex }; }); },
         onSelect: function (r) { api.ui({ selectedItemId: r.itemId, paneTab: 'summary' }); },
@@ -138,6 +139,16 @@ import * as R from 'react';
         { title: quoteId === 'self' ? 'Chose self-perform for ' + pkg.name : quoteId ? 'Accepted ' + (q.vendor ? q.vendor.name : 'a quote') + ' for ' + pkg.name : 'Cleared the pick for ' + pkg.name, detail: quoteId === 'self' ? GL.fmtMoney(pkg.selfTotal) : q && q.total != null ? GL.fmtMoney(q.total) : 'back to plug', icon: 'request_quote' });
     }
     function enter(pkg, quoteId) { p.openDialog({ kind: 'quote', packageId: pkg.id, quoteId: quoteId || null }); }
+    function setPlug(pkg, itemId, value) {
+      if (d.bid.status === 'submitted') { p.toast('This bid was submitted. Reopen it from Bid day to change it.'); return; }
+      if (value == null || value === '' || isNaN(value) || value < 0) { p.toast('Enter a plug price of zero or more.'); return; }
+      var line = pkg.lines.find(function (l) { return l.itemId === itemId; });
+      api.update(function (doc) {
+        var e = doc.estimates[doc.currentBidId];
+        var t = e.tasks.find(function (x) { return x.packageId === pkg.id && x.itemId === itemId; });
+        if (t) t.plug = value; else e.tasks.push({ id: GL.uid('T'), itemId: itemId, name: pkg.name + ' (sub)', type: 'sub', packageId: pkg.id, plug: value });
+      }, { title: 'Set plug on ' + GL.itemLabel(line && line.item), detail: GL.fmtMoney(value, 2) + ' / ' + (line ? line.unit : ''), icon: 'request_quote' });
+    }
     return h('div', { className: 'gl-quotes' },
       h('div', { className: 'gl-quotes__head' },
         h('div', { className: 'gl-tiles' },
@@ -145,7 +156,7 @@ import * as R from 'react';
           h(M.StatTile, { size: 's', label: 'Quotes received', value: String(d.packages.reduce(function (a, x) { return a + x.quotes.filter(function (q) { return q.status === 'received'; }).length; }, 0)), supporting: d.packages.reduce(function (a, x) { return a + x.quotes.filter(function (q) { return q.status === 'pending'; }).length; }, 0) + ' still out', tone: 'warning' }),
           h(M.StatTile, { size: 's', label: 'Subcontract total', value: money(d.totals.sub), supporting: (d.totals.direct ? Math.round(d.totals.sub / d.totals.direct * 100) : 0) + '% of direct cost' })),
         h(M.Button, { variant: 'filled', icon: 'add', size: 's', onClick: function () { p.openDialog({ kind: 'package' }); } }, 'New quote package')),
-      d.packages.length ? d.packages.map(function (pkg) { return h(PackageCard, { key: pkg.id, pkg: pkg, d: d, pick: pick, enter: enter, highlight: p.focusPackageId === pkg.id }); })
+      d.packages.length ? d.packages.map(function (pkg) { return h(PackageCard, { key: pkg.id, pkg: pkg, d: d, pick: pick, enter: enter, setPlug: setPlug, highlight: p.focusPackageId === pkg.id }); })
         : h(M.EmptyState, { icon: 'request_quote', headline: 'No quote packages yet', body: 'Group the pay items a sub or supplier will price, then type in each quote as it comes in by phone or email. Quotes line up side by side against your plug.', action: h(M.Button, { icon: 'add', onClick: function () { p.openDialog({ kind: 'package' }); } }, 'New quote package') }));
   }
 
@@ -154,7 +165,7 @@ import * as R from 'react';
     var received = pkg.quotes.filter(function (q) { return q.status === 'received'; });
     var cols = [{ key: 'label', header: 'Line', width: 260, render: function (r) { return r.kind === 'total' ? 'Package total' : h('span', { className: 'gl-itemcell' }, h('span', { className: 'gl-itemcode' }, r.code), h('span', { className: 'gl-itemname' }, r.label)); } },
       { key: 'qty', header: 'Qty', type: 'number', width: 90, render: function (r) { return r.kind === 'total' ? '' : GL.fmtNum(r.qty) + ' ' + r.unit; } },
-      { key: 'plug', header: 'Plug', type: 'money', decimals: 2, width: 96, render: function (r) { return r.kind === 'total' ? GL.fmtMoney(pkg.plugTotal) : r.plug != null ? GL.fmtMoney(r.plug, 2) : h('span', { className: 'gl-dim' }, '–'); } }];
+      { key: 'plug', header: 'Plug', hint: 'your price until a quote is picked', type: 'money', decimals: 2, width: 110, editable: function (r) { return r.kind !== 'total'; }, placeholder: '–' }];
     pkg.quotes.forEach(function (q) {
       var sel = pkg.selectedQuoteId === q.id;
       cols.push({ key: q.id, type: 'money', decimals: 2, width: 170, header: h('span', { className: 'gl-qhead' + (sel ? ' is-selected' : '') }, h('span', { className: 'gl-qhead__name' }, q.vendor ? q.vendor.name : 'Vendor'), h('span', { className: 'gl-qhead__row' }, h(M.StatusChip, { status: sel ? 'selected' : q.status, label: q.lump != null && q.status === 'received' && !sel ? 'Lump sum' : undefined, size: 's' }), h(M.IconButton, { icon: q.status === 'pending' ? 'edit_note' : 'edit', label: (q.status === 'pending' ? 'Enter quote from ' : 'Edit quote from ') + (q.vendor ? q.vendor.name : 'vendor'), size: 'xs', onClick: function () { p.enter(pkg, q.id); } }))),
@@ -172,7 +183,7 @@ import * as R from 'react';
         render: function (r) { if (r.kind === 'total') return h('span', { className: selSelf ? 'gl-strong' : '' }, GL.fmtMoney(pkg.selfTotal)); var s = pkg.selfSplit; return s ? GL.fmtMoney(s.labor + s.equipment + s.material, 2) : ''; } });
     }
     var rows = pkg.lines.map(function (l) { var t = d.est.tasks.find(function (x) { return x.packageId === pkg.id && x.itemId === l.itemId; }); return { id: l.itemId, itemId: l.itemId, code: l.item ? l.item.code : '', label: l.item ? l.item.name : '', qty: l.qty, unit: l.unit, plug: t ? t.plug : null }; })
-      .concat([{ id: 'total', kind: 'total', label: 'Package total' }]);
+      .concat([{ id: 'total', kind: 'total', label: 'Package total', plug: pkg.plugTotal }]);
     var bestNote = pkg.best && pkg.selected && pkg.best.id !== pkg.selected.id && pkg.selected.total != null ? pkg.best.vendor.name + ' is ' + GL.fmtMoney(pkg.selected.total - pkg.best.total) + ' lower than your pick.' : null;
     return h('div', { className: 'gl-pkg' + (p.highlight ? ' is-focus' : '') },
       h('div', { className: 'gl-pkg__head' },
@@ -180,7 +191,8 @@ import * as R from 'react';
         h('div', { className: 'gl-pkg__actions' },
           h(M.Button, { variant: 'tonal', size: 'xs', icon: 'add', onClick: function () { p.enter(pkg, null); } }, 'Add quote'))),
       bestNote ? h(M.Banner, { tone: 'info', compact: true, actions: h(M.Button, { variant: 'text', size: 'xs', onClick: function () { p.pick(pkg, pkg.best.id); } }, 'Use ' + pkg.best.vendor.name) }, bestNote) : null,
-      h(M.DataGrid, { label: 'Quotes for ' + pkg.name, columns: cols, rows: rows, density: 'dense' }),
+      h(M.DataGrid, { label: 'Quotes for ' + pkg.name, columns: cols, rows: rows, density: 'dense', onEdit: function (row, col, value) { if (col.key === 'plug' && row.kind !== 'total') p.setPlug(pkg, row.itemId, value); } }),
+      pkg.lumpByQty ? h('div', { className: 'body-small gl-dim gl-pkg__note' }, 'Lump sums here are split by quantity because an item has no plug. Set a plug on every item to split them by your prices instead.') : null,
       h('div', { className: 'gl-pkg__pick' },
         h('span', { className: 'label-medium gl-dim' }, 'Use:'),
         pkg.quotes.filter(function (q) { return q.status === 'received'; }).map(function (q) { return h(M.Chip, { key: q.id, variant: 'filter', label: q.vendor.name + ' · ' + GL.fmtMoney(q.total), selected: pkg.selectedQuoteId === q.id, onClick: function () { p.pick(pkg, pkg.selectedQuoteId === q.id ? null : q.id); } }); }),
@@ -194,14 +206,17 @@ import * as R from 'react';
     var d = p.d, api = p.api, mk = d.est.markup;
     var target = useState('');
     var due = GL.daysUntil(d.bid.due);
+    var submitted = d.bid.status === 'submitted';
     function setMk(key, v, label) {
       var str = String(v).trim(); if (str === '') return; // an empty box keeps the old rate
+      if (submitted) { p.toast('This bid was submitted. Reopen it to change the markup.'); return; }
       var n = Math.round(Number(str) * 1000) / 1000; if (isNaN(n) || n < 0 || n > 100) { p.toast('Use a percent from 0 to 100.'); return; }
       if (n === mk[key]) return;
       api.update(function (doc) { doc.estimates[doc.currentBidId].markup[key] = n; }, { title: 'Set ' + label + ' to ' + n + '%', detail: 'from ' + mk[key] + '%', icon: 'percent' });
     }
     function balance() {
-      var t = Number(String(target[0]).replace(/[$,]/g, '')); if (!(t > 0)) return;
+      if (submitted) { p.toast('This bid was submitted. Reopen it to balance it.'); return; }
+      var t = Number(String(target[0]).replace(/[$,]/g, '')); if (!(t > 0)) { p.toast('Type the total you want, then Balance.'); return; }
       var unlocked = d.items.filter(function (i) { return !i.locked && i.qty > 0 && i.direct > 0; });
       if (!unlocked.length) { p.toast('Every price is locked; unlock one to balance.'); return; }
       var diff = t - d.totals.bidTotal;
@@ -209,13 +224,13 @@ import * as R from 'react';
       // plan A: move it all onto the biggest unlocked item; plan B: spread in proportion to extended amounts
       var big = unlocked.reduce(function (a, i) { return i.ext > a.ext ? i : a; });
       var plan = [{ item: big, unit: Math.round((big.unitPrice + diff / big.qty) * 100) / 100 }];
-      var how = 'Moved ' + GL.fmtMoney(diff) + ' onto ' + big.code + ' and locked it';
+      var how = 'Moved ' + GL.fmtMoney(diff) + ' onto ' + GL.itemLabel(big) + ' and locked it';
       if (plan[0].unit <= big.unitCost) {
         var sumExt = unlocked.reduce(function (a, i) { return a + i.ext; }, 0);
         plan = unlocked.map(function (i) { return { item: i, unit: Math.round((i.unitPrice + diff * (i.ext / sumExt) / i.qty) * 100) / 100 }; });
         how = 'Spread ' + GL.fmtMoney(diff) + ' across ' + plan.length + ' items and locked them';
         var bad = plan.filter(function (x) { return x.unit <= x.item.unitCost; });
-        if (bad.length) { p.toast('That total would price ' + bad[0].item.code + ' below cost. Pick a higher total.'); return; }
+        if (bad.length) { p.toast('That total would price ' + GL.itemLabel(bad[0].item) + ' below cost. Pick a higher total.'); return; }
       }
       // close the cents: rounding leaves a few dollars; put the residual on the planned item with the smallest quantity (a lump sum closes it exactly)
       var after = fixedExt + unlocked.reduce(function (a, i) { var pl = plan.find(function (x) { return x.item === i; }); return a + (pl ? pl.unit : i.unitPrice) * i.qty; }, 0);
@@ -243,7 +258,7 @@ import * as R from 'react';
     ];
     return h('div', { className: 'gl-bidday' },
       due >= 0 && d.bid.status !== 'submitted' ? h(M.Banner, { tone: due <= 2 ? 'warning' : 'info', compact: true }, 'Bid due ' + (due === 0 ? 'today' : due === 1 ? 'tomorrow' : 'in ' + due + ' days') + ' · ' + GL.fmtDate(d.bid.due) + ' at ' + d.bid.dueTime + '. ' + (d.errors ? d.errors + ' check' + (d.errors > 1 ? 's' : '') + ' must clear first.' : 'Checks are clear.')) : null,
-      d.bid.status === 'submitted' ? h(M.Banner, { tone: 'success', compact: true }, 'Submitted ' + GL.fmtDate(d.bid.due) + '. Prices are frozen as submitted; undo to reopen.') : null,
+      submitted ? h(M.Banner, { tone: 'success', compact: true }, 'Marked as submitted' + (d.bid.submittedAt ? ' ' + GL.fmtDate(d.bid.submittedAt) : '') + (d.bid.total ? ' at ' + GL.fmtMoney(d.bid.total, 2) : '') + '. Prices, markup and quantities are read-only until you reopen the bid.') : null,
       h('div', { className: 'gl-tiles' },
         h(M.StatTile, { label: 'Direct cost', value: money(d.totals.direct), supporting: GL.fmtNum(d.items.length) + ' items', icon: 'construction' }),
         h(M.StatTile, { label: 'Overhead ' + mk.overhead + '%', value: money(d.totals.overhead) }),
@@ -268,6 +283,7 @@ import * as R from 'react';
       h(M.DataGrid, { label: 'Bid prices', columns: cols, rows: rows, footer: true, density: 'dense', onSelect: function (r) { p.ui.selectedItemId === r.itemId ? null : api.ui({ selectedItemId: r.itemId }); },
         onEdit: function (row, col, value) {
           if (col.key !== 'unitPrice') return;
+          if (submitted) { p.toast('This bid was submitted. Reopen it to change prices.'); return; }
           var it = d.items.find(function (i) { return i.id === row.itemId; });
           if (value == null || value === '') { if (it.locked) p.toggleLock(row.itemId); return; }
           if (isNaN(value) || value < 0) { p.toast('A unit price cannot be negative.'); return; }
@@ -352,7 +368,7 @@ import * as R from 'react';
       body = h('div', { className: 'gl-export' },
         h('div', { className: 'gl-export__bar' },
           h(GL.Select, { label: 'Accounting system', value: sys, options: Object.keys(systems).map(function (k) { return { value: k, label: systems[k] }; }), onChange: function (v) { api.ui({ exportSystem: v }); } }),
-          h(M.Button, { variant: 'filled', icon: 'download', onClick: function () { p.openDialog({ kind: 'export' }); } }, 'Download CSV'),
+          h(M.Button, { variant: 'filled', icon: 'download', onClick: function () { p.openDialog({ kind: 'export' }); } }, 'Export budget'),
           h('div', { className: 'body-small gl-dim' }, sys === 'qbd' || sys === 'qbo' ? 'QuickBooks gets an estimate: one line per pay item with quantity, unit price and amount. The cost split rides along for job costing.' : 'Phase codes come from the pay item codes; cost types map to ' + systems[sys] + "'s labor, equipment, material, subcontract and other.")),
         h(M.DataGrid, { label: 'Budget export preview', density: 'dense', zebra: true, rows: d.items.map(function (it) { return { id: it.id, phase: it.code, desc: it.name, qty: it.qty, unit: it.unit, labor: it.labor || null, equipment: it.equipment || null, material: it.material || null, sub: it.sub || null, other: it.other || null, total: it.direct }; }), footer: true, columns: [
           { key: 'phase', header: sys === 'qbo' || sys === 'qbd' ? 'Item' : 'Phase', width: 90 }, { key: 'desc', header: 'Description', width: 260 }, { key: 'qty', header: 'Qty', type: 'number', decimals: 2, width: 90, render: function (r) { return GL.fmtNum(r.qty, r.qty % 1 ? 2 : 0); } }, { key: 'unit', header: 'UM', width: 60, align: 'center' },

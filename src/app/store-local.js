@@ -34,6 +34,7 @@ export function useLocalStore() {
     update(fn, entry) {
       set(prev => {
         const draft = clone(prev.stack[prev.index].doc);
+        if (prev.ui.bidId) draft.currentBidId = prev.ui.bidId; // edits always go to the bid that is open on screen
         if (fn(draft) === false) return prev;
         const e = Object.assign({ id: GL.uid('e'), who: 'You', when: nowLabel(), icon: 'edit' }, entry || { title: 'Edited' });
         let stack = prev.stack.slice(0, prev.index + 1).concat([{ doc: draft, entry: e }]);

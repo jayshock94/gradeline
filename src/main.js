@@ -103,4 +103,25 @@ function Landing(p) {
         h(M.Button, { variant: p.demoOnly ? 'filled' : 'tonal', size: 'm', icon: 'play_arrow', onClick: () => p.navigate('/demo') }, 'Try the demo'))));
 }
 
-createRoot(document.getElementById('root')).render(h(Root));
+// One bad record must not take the whole app down: show what happened and a way back.
+class Boundary extends R.Component {
+  constructor(p) { super(p); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error) { try { console.error('Benchstake screen error', error); } catch (e) { /* ignore */ } }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const msg = (this.state.error && this.state.error.message) || String(this.state.error);
+    const demo = window.location.pathname.startsWith('/demo');
+    return h('div', { className: 'gl-auth' },
+      h('div', { className: 'gl-auth__card' },
+        h('div', { className: 'gl-auth__brand' }, h(GL.Mark, { size: 36 }), h('span', { className: 'gl-auth__name' }, 'Benchstake')),
+        h('h1', { className: 'headline-small' }, 'Something went wrong on this screen'),
+        h('p', { className: 'body-medium' }, 'Nothing you saved was lost. Reload to pick up where you were.' + (demo ? ' If it happens again in the demo, reset the sample data.' : '')),
+        h('p', { className: 'body-small gl-dim' }, msg),
+        h('div', { className: 'gl-auth__actions' },
+          h(M.Button, { variant: 'filled', icon: 'refresh', onClick: () => window.location.reload() }, 'Reload'),
+          demo ? h(M.Button, { variant: 'tonal', icon: 'restart_alt', onClick: () => { try { Object.keys(localStorage).filter(k => k.startsWith('gradeline.demo')).forEach(k => localStorage.removeItem(k)); } catch (e) { /* ignore */ } window.location.reload(); } }, 'Reset sample data') : null)));
+  }
+}
+
+createRoot(document.getElementById('root')).render(h(Boundary, null, h(Root)));

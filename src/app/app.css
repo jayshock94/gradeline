@@ -203,7 +203,8 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 /* compact */
 @media (max-width: 839px) {
   .gl-bidday__controls { grid-template-columns: 1fr; }
-  .gl-estimate__kpis .gl-kpi { display: none; }
+  .gl-estimate__kpis .gl-kpi:not(.gl-kpi--total) { display: none; } /* the bid total always stays in view */
+  .gl-estimate__kpis .gl-kpi--total .gl-kpi__label { display: none; }
   .gl-paper { padding: 20px 16px; }
   .gl-dialog__form { min-width: 0; }
   .gl-dialog--wide { width: auto; }
@@ -265,3 +266,11 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 @media (max-width: 640px) { .gl-crewrow { grid-template-columns: 90px 1fr 40px; } .gl-crewrow__rate { display: none; } }
 .gl-linkbtn { border: 0; padding: 0; background: none; font: inherit; cursor: pointer; }
 .gl-linkbtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--corner-extra-small); }
+
+/* grids wider than their box: show that they scroll */
+.m3-grid { scrollbar-width: thin; scrollbar-color: var(--outline-variant) transparent; }
+.m3-grid::-webkit-scrollbar { height: 10px; }
+.m3-grid::-webkit-scrollbar-thumb { background: var(--outline-variant); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+.m3-grid::-webkit-scrollbar-track { background: transparent; }
+.gl-pkg__note { padding: var(--space-2) var(--space-3) 0; }
+@media (max-width: 480px) { .gl-dialog__form .m3-segmented { flex-wrap: wrap; } .gl-dialog__form .m3-segmented__seg { flex: 1 1 45%; } }

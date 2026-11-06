@@ -35,7 +35,7 @@ npm run build && npm test   # production build + headless browser checks
 
 1. Go to supabase.com, create a project called `gradeline` (pick the region closest to you; save the database password somewhere).
 2. Open **SQL Editor** and run each file in `supabase/migrations/` in order (`0001_init.sql`, then `0002_tighten.sql`). Together they create every table, the security rules and the functions.
-3. **Authentication › Providers › Email**: leave it on, and leave **Confirm email** on. The app signs people in with emailed links (magic links), which Supabase sends for you; invites only work for confirmed email addresses.
+3. **Authentication › Providers › Email**: leave it on, and leave **Confirm email** on. People sign in by typing a code from an email, so the **Confirm signup** and **Magic link** email templates must contain `{{ .Token }}` (Supabase's defaults only contain a link). Connect your own email sender (Authentication › Emails › SMTP settings; Resend works well) so the emails reach anyone and can be edited. Invites only work for confirmed email addresses.
 4. **Authentication › Providers › Google**: turn it on. It needs a Google OAuth client:
    - In Google Cloud Console, create a project, go to **APIs & Services › Credentials › Create credentials › OAuth client ID**, type **Web application**.
    - Authorized redirect URI: the **Callback URL** Supabase shows on the Google provider page (it looks like `https://xxxx.supabase.co/auth/v1/callback`).

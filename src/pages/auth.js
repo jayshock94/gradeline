@@ -150,7 +150,7 @@ export function SettingsPage(p) {
     if (!/.+@.+\..+/.test(email)) { setErr('Enter an email address.'); return; }
     const { error } = await supabase.from('invites').insert({ org_id: org.id, email: email.trim().toLowerCase(), role, invited_by: user.id });
     if (error) { setErr(error.code === '23505' ? 'That email is already invited.' : error.message); return; }
-    setMsg(email.trim() + ' can sign in with that email (Google or a sign-in link) and will land in ' + org.name + '.');
+    setMsg('No email is sent. Tell them to go to ' + window.location.origin + ', sign in with ' + email.trim() + ' (a code is emailed to them), and they will land in ' + org.name + '. The invite lasts 30 days.');
     setEmail(''); load();
   }
   async function cancelInvite(id) { const { error } = await supabase.from('invites').delete().eq('id', id); if (error) setErr(error.message); load(); }

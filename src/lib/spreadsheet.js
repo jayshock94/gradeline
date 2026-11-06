@@ -8,6 +8,19 @@ GL.readSpreadsheet = async function (file) {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
-  return rows.map(r => r.map(c => (c == null ? '' : String(c))).join('\t')).filter(l => l.replace(/\t/g, '').trim()).join('\n');
+  // Percent-formatted cells come through as "38%" (not 0.38); everything else as its raw value.
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  const rows = [];
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const row = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      if (!cell || cell.v == null) { row.push(''); continue; }
+      if (typeof cell.v === 'number' && /%/.test(cell.z || '')) row.push(String(Math.round(cell.v * 10000) / 100) + '%');
+      else if (cell.t === 'd' && cell.v instanceof Date) row.push(cell.v.toISOString().slice(0, 10));
+      else row.push(String(cell.v));
+    }
+    rows.push(row);
+  }
+  return rows.map(r => r.join('\t')).filter(l => l.replace(/\t/g, '').trim()).join('\n');
 };

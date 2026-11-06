@@ -4,7 +4,7 @@ GL.VERSION = 1;
 
 GL.seed = function () {
   var today = new Date(); today.setHours(0, 0, 0, 0);
-  function dayOffset(n) { var d = new Date(today); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+  function dayOffset(n) { var d = new Date(today); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 
   var labor = [
     { id: 'L1', name: 'Foreman', rate: 58 }, { id: 'L2', name: 'Operator', rate: 52 }, { id: 'L3', name: 'Laborer', rate: 38 },

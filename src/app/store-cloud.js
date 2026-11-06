@@ -144,7 +144,15 @@ export function useCloudStore({ supabase, orgId, user, name }) {
   async function fetchHistory(sc) {
     const { data, error } = await supabase.from('history').select('version,entry,user_id,created_at').eq('org_id', orgId).eq('scope', sc).order('version', { ascending: false }).limit(HISTORY_LIMIT);
     if (error) { setNotice('Could not load the history: ' + error.message); return null; }
-    return data.reverse();
+    return data.reverse().map(stampWhen);
+  }
+  // "when" on a history row comes from the server's created_at, shown in the reader's own time zone (with the date when it is not today)
+  function stampWhen(r) {
+    if (!r || !r.created_at) return r;
+    const d = new Date(r.created_at); if (isNaN(d)) return r;
+    const today = new Date(); const sameDay = d.toDateString() === today.toDateString();
+    const when = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + (sameDay ? '' : ' · ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+    return { ...r, entry: { ...(r.entry || {}), when } };
   }
   function refreshHistoryIfCurrent(sc) { if (histRef.current.scope === sc) fetchHistory(sc).then(rows => { if (rows) setHist(h => h.scope === sc ? { ...h, rows, cursor: cursorFromRows(rows) } : h); }); }
   R.useEffect(() => {
@@ -157,6 +165,7 @@ export function useCloudStore({ supabase, orgId, user, name }) {
   function pushHistory(sc, row) {
     setHist(h => {
       if (h.scope !== sc) return h;
+      if (h.rows.some(r => r.version === row.version)) return h;
       const rows = h.rows.concat([row]).slice(-HISTORY_LIMIT);
       const cursor = row.entry.restoreOf != null ? Math.max(0, rows.findIndex(r => r.version === row.entry.restoreOf)) : rows.length - 1;
       return { ...h, rows, cursor: cursor >= 0 ? cursor : rows.length - 1 };
@@ -264,6 +273,15 @@ export function useCloudStore({ supabase, orgId, user, name }) {
       const { data: snapRow, error } = await supabase.from('history').select('snapshot').eq('org_id', orgId).eq('scope', h.scope).eq('version', row.version).single();
       if (error) throw error;
       const snapshot = snapRow.snapshot;
+      if (h.scope === 'library') {
+        const cur = buildDoc(committed.current, uiRef.current);
+        const gone = [];
+        ['crews', 'labor', 'equipment', 'materials', 'vendors'].forEach(kind => {
+          const keep = new Set(((snapshot && snapshot[kind]) || []).map(x => x.id));
+          ((cur.library && cur.library[kind]) || []).forEach(x => { if (!keep.has(x.id)) { const n = GL.usedBy(cur, kind, x.id); if (n) gone.push(x.name + ' (used in ' + n + ' place' + (n > 1 ? 's' : '') + ')'); } });
+        });
+        if (gone.length) throw new Error('Going back would remove ' + gone.slice(0, 3).join(', ') + (gone.length > 3 ? ' and more' : '') + ' while estimates still use them. Change those estimates first.');
+      }
       const e = entryWith({ title, detail: row.entry && row.entry.title ? 'back to: ' + row.entry.title : '', icon: 'history', restoreOf: row.version });
       const v = await saveScope(h.scope, snapshot, e, committedVersion(h.scope) || 0);
       if (v == null) throw new Error('Someone saved at the same moment. Nothing was changed; check the history and try again.');

@@ -18,8 +18,40 @@ import { M3 } from '../ds/index.js';
   };
 
   GL.blankEstimate = function () { return { items: [], tasks: [], packages: [], markup: { overhead: 6, profit: 4, bond: 1.2, tax: 0 }, targetMargin: 9, locks: {} }; };
+  // Fill in anything an estimate row is missing (older rows, rows written by other tools) so derive never throws on it.
+  GL.normalizeEstimate = function (est) {
+    var blank = GL.blankEstimate();
+    var e = Object.assign(blank, est || {});
+    e.items = Array.isArray(e.items) ? e.items : []; e.tasks = Array.isArray(e.tasks) ? e.tasks : []; e.packages = Array.isArray(e.packages) ? e.packages : [];
+    e.markup = Object.assign({ overhead: 6, profit: 4, bond: 1.2, tax: 0 }, e.markup || {});
+    e.locks = e.locks && typeof e.locks === 'object' ? e.locks : {};
+    if (!(e.targetMargin >= 0)) e.targetMargin = 9;
+    return e;
+  };
+  // A local YYYY-MM-DD (toISOString would give tomorrow's date in the evening, US time)
+  GL.today = function () { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  GL.validDate = function (s) { if (!/^\d{4}-\d{2}-\d{2}$/.test(s || '')) return false; var d = new Date(s + 'T00:00:00'); return !isNaN(d) && d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') === s; };
+  // Clock times: the app stores "2:00 PM"; <input type="time"> speaks "14:00"
+  GL.time24 = function (t) { var m = /^(\d{1,2}):(\d{2})\s*([AP]M)?$/i.exec(String(t || '').trim()); if (!m) return ''; if (!m[3]) return String(m[1]).padStart(2, '0') + ':' + m[2]; var hh = Number(m[1]) % 12; if (m[3] && m[3].toUpperCase() === 'PM') hh += 12; if (!m[3] && Number(m[1]) === 12) hh = 12; return String(hh).padStart(2, '0') + ':' + m[2]; };
+  GL.fmtTime = function (t) { var m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim()); if (!m) return /^\d{1,2}:\d{2}\s*[AP]M$/i.test(t || '') ? String(t).trim().toUpperCase() : ''; var hh = Number(m[1]); return ((hh % 12) || 12) + ':' + m[2] + ' ' + (hh >= 12 ? 'PM' : 'AM'); };
+  // Short label for a pay item in messages: code plus name, never the code alone ("1" means nothing to a reader)
+  GL.itemLabel = function (it, max) { if (!it) return ''; var n = String(it.name || ''); max = max || 32; if (n.length > max) n = n.slice(0, max - 1) + '…'; return it.code ? it.code + ' ' + n : n; };
+  // How many crews, tasks and quotes point at a library record (so a delete or a restore never leaves a hole in an estimate)
+  GL.usedBy = function (doc, kind, id) {
+    var n = 0, lib = doc.library;
+    if (kind === 'labor' || kind === 'equipment') (lib.crews || []).forEach(function (c) { (c[kind] || []).forEach(function (x) { if (x[0] === id) n++; }); });
+    Object.keys(doc.estimates || {}).forEach(function (k) {
+      var e = doc.estimates[k] || {};
+      (e.tasks || []).forEach(function (t) { if ((kind === 'crews' && t.crewId === id) || (kind === 'materials' && t.matId === id)) n++; });
+      (e.packages || []).forEach(function (pk) {
+        if (pk.selfPerform && ((kind === 'crews' && pk.selfPerform.crewId === id) || (kind === 'materials' && pk.selfPerform.matId === id))) n++;
+        (pk.quotes || []).forEach(function (q) { if (kind === 'vendors' && q.vendorId === id) n++; });
+      });
+    });
+    return n;
+  };
   GL.derive = function (doc, bidId) {
-    var est = doc.estimates[bidId || doc.currentBidId] || GL.blankEstimate(), lib = doc.library;
+    var est = GL.normalizeEstimate(doc.estimates[bidId || doc.currentBidId]), lib = Object.assign({ crews: [], labor: [], equipment: [], materials: [], vendors: [] }, doc.library || {});
     var items = est.items, tasks = est.tasks, pkgs = est.packages;
     var crews = byId(lib.crews), mats = byId(lib.materials), vendors = byId(lib.vendors), pkgMap = byId(pkgs), itemMap = byId(items);
     var crewRates = {}; lib.crews.forEach(function (c) { crewRates[c.id] = GL.crewRate(c, lib); });
@@ -45,22 +77,25 @@ import { M3 } from '../ds/index.js';
       var quotes = p.quotes.map(function (q) {
         var total = null, complete = true, unitPrices = q.unitPrices || {};
         if (q.status === 'received' && q.lump != null) {
-          var w = lines.map(function (l) { var t = tasks.find(function (t) { return t.packageId === p.id && t.itemId === l.itemId; }); return t && t.plug ? t.plug * l.qty : l.qty; });
+          var plugs = lines.map(function (l) { var t = tasks.find(function (t) { return t.packageId === p.id && t.itemId === l.itemId; }); return t && t.plug > 0 ? t.plug : null; });
+          var byPlug = lines.length > 0 && plugs.every(function (x) { return x != null; });
+          var w = lines.map(function (l, i) { return byPlug ? plugs[i] * l.qty : l.qty; });
           var sw = w.reduce(function (a, x) { return a + x; }, 0) || 1;
           unitPrices = {}; lines.forEach(function (l, i) { if (l.qty) unitPrices[l.itemId] = q.lump * w[i] / sw / l.qty; });
-          total = q.lump;
+          total = q.lump; q = Object.assign({}, q, { spread: byPlug ? 'plug' : 'qty' });
         } else if (q.status === 'received' && q.unitPrices) {
           total = 0;
           lines.forEach(function (l) { var up = q.unitPrices[l.itemId]; if (up == null) complete = false; else total += up * l.qty; });
         }
         var qtyIssue = null;
         if (q.lineQty) Object.keys(q.lineQty).forEach(function (iid) { var it = itemMap[iid]; if (it && Math.abs(q.lineQty[iid] - it.qty) / (it.qty || 1) > 0.02) qtyIssue = { itemId: iid, quoted: q.lineQty[iid], bid: it.qty, unit: it.unit }; });
-        return Object.assign({}, q, { unitPrices: unitPrices, vendor: vendors[q.vendorId] || (q.vendorName ? { id: null, name: q.vendorName, contact: '', trade: '' } : null), total: total, complete: complete, vsPlug: total != null && plugTotal ? (total - plugTotal) / plugTotal : null, qtyIssue: qtyIssue });
+        return Object.assign({}, q, { unitPrices: unitPrices, vendor: vendors[q.vendorId] || { id: null, name: q.vendorName || 'Unknown company', contact: '', trade: '' }, total: total, complete: complete, vsPlug: total != null && plugTotal ? (total - plugTotal) / plugTotal : null, qtyIssue: qtyIssue });
       });
       var received = quotes.filter(function (q) { return q.total != null; });
+      var lumpByQty = quotes.some(function (q) { return q.spread === 'qty'; });
       var best = received.length ? received.reduce(function (a, q) { return q.total < a.total ? q : a; }) : null;
       var selected = quotes.find(function (q) { return q.id === p.selectedQuoteId; }) || null;
-      return Object.assign({}, p, { lines: lines, quotes: quotes, plugTotal: plugTotal, selfTotal: selfTotal, selfSplit: selfSplit, best: best, selected: selected, selfSelected: p.selectedQuoteId === 'self' });
+      return Object.assign({}, p, { lines: lines, quotes: quotes, plugTotal: plugTotal, selfTotal: selfTotal, selfSplit: selfSplit, best: best, selected: selected, selfSelected: p.selectedQuoteId === 'self', lumpByQty: lumpByQty });
     });
     var dPkgMap = byId(dPkgs);
 
@@ -146,16 +181,17 @@ import { M3 } from '../ds/index.js';
     if (totals.margin < (est.targetMargin || 0) - 0.05) checks.push({ sev: 'warning', title: 'Margin below target', detail: 'Margin is ' + totals.margin.toFixed(1) + '%, target is ' + est.targetMargin + '%.', tab: 'bidday' });
     var pendingSel = dPkgs.filter(function (p) { return p.selected && p.selected.status === 'pending'; });
     var errors = checks.filter(function (c) { return c.sev === 'error'; }).length, warnings = checks.length - errors;
+    var unpriced = dItems.filter(function (i) { return i.problems.some(function (p) { return p.sev === 'error'; }); }).length;
     if (!errors && dItems.length) checks.push({ sev: 'ok', title: 'Every pay item has a price', detail: dItems.length + ' items, ' + Object.keys(dTasks).length + ' tasks priced.' });
     if (totals.lockedCount) checks.push({ sev: 'ok', title: totals.lockedCount + ' price' + (totals.lockedCount > 1 ? 's' : '') + ' locked', detail: 'Locked prices stay put when costs change.' });
 
-    return { est: est, items: dItems, tasks: dTasks, packages: dPkgs, totals: totals, checks: checks, errors: errors, warnings: warnings, crewRates: crewRates, bid: bid, multiplier: multiplier };
+    return { est: est, items: dItems, tasks: dTasks, packages: dPkgs, totals: totals, checks: checks, errors: errors, warnings: warnings, unpriced: unpriced, crewRates: crewRates, bid: bid, multiplier: multiplier };
   };
 
   GL.fmtMoney = function (v, d) { return M3.fmtMoney(v, d); };
   GL.fmtNum = function (v, d) { if (v == null || isNaN(v)) return ''; return Number(v).toLocaleString('en-US', { minimumFractionDigits: d || 0, maximumFractionDigits: d != null ? d : 2 }); };
   GL.daysUntil = function (iso) { var d = new Date(iso + 'T00:00:00'); var t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d - t) / 86400000); };
-  GL.fmtDate = function (iso) { var d = new Date(iso + 'T00:00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
+  GL.fmtDate = function (iso) { if (!iso) return ''; var d = new Date(iso + 'T00:00:00'); return isNaN(d) ? String(iso) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
   GL.dueStatus = function (bid) {
     if (['won', 'lost', 'no-bid', 'submitted'].indexOf(bid.status) >= 0) return null;
     var n = GL.daysUntil(bid.due);

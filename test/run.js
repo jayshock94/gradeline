@@ -100,6 +100,10 @@ function makeXlsx() {
   await page.getByRole('dialog').getByLabel('Unit price').first().fill('41.5');
   await page.getByRole('button', { name: 'Save quote' }).click(); await page.waitForTimeout(250);
   check((await page.getByText('Wasatch Pipe Supply').count()) >= 1, 'a quote can be entered by hand, with a new company');
+  const plugCells = page.getByRole('button', { name: /^Plug, / });
+  check((await plugCells.count()) > 0, 'plug cells on the quotes tab can be edited');
+  await plugCells.first().click(); await page.keyboard.press('Control+A'); await page.keyboard.type('123.45'); await page.keyboard.press('Enter'); await page.waitForTimeout(250);
+  check((await page.getByText('$123.45').count()) >= 1, 'typing a plug on the quotes tab saves it');
   await shot('03-quotes');
   await page.getByRole('tab', { name: 'Checks' }).click();
   await page.getByRole('button', { name: 'Go to' }).first().click(); await page.waitForTimeout(200);
@@ -116,6 +120,23 @@ function makeXlsx() {
   await page.getByRole('button', { name: 'Balance' }).click(); await page.waitForTimeout(300);
   check((await total()) === '$2,300,000', 'balance hits the target exactly (' + (await total()) + ')');
   await shot('04-bidday');
+  // Escape closes a dialog
+  await page.getByRole('button', { name: 'Edit bid details' }).click();
+  check((await page.getByRole('dialog').count()) === 1, 'edit bid dialog opens');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  check((await page.getByRole('dialog').count()) === 0, 'Escape closes the dialog');
+  // a submitted bid is read-only until reopened (set through Edit bid, which warns when checks are open)
+  await page.getByRole('button', { name: 'Edit bid details' }).click();
+  await page.getByRole('dialog').getByRole('combobox', { name: 'Status' }).selectOption('submitted');
+  check((await page.getByRole('dialog').getByText(/not cleared on this bid/).count()) === 1, 'edit bid warns when checks have not cleared');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click(); await page.waitForTimeout(250);
+  check((await page.getByText(/Marked as submitted [A-Z][a-z]{2} \d+.*read-only/).count()) === 1, 'submitted banner shows the date and says read-only');
+  const tSub = await total();
+  await page.getByRole('button', { name: /^Unit price, / }).first().click();
+  await page.keyboard.press('Control+A'); await page.keyboard.type('1'); await page.keyboard.press('Enter'); await page.waitForTimeout(250);
+  check((await total()) === tSub && (await page.getByText('This bid was submitted').count()) >= 1, 'prices cannot change on a submitted bid');
+  await page.getByRole('button', { name: 'Reopen bid' }).click(); await page.waitForTimeout(250);
+  check((await page.getByRole('button', { name: 'Mark as submitted' }).count()) === 1, 'reopening the bid brings the submit button back');
 
   // edit bid details
   await page.getByRole('button', { name: 'Edit bid details' }).click();
@@ -129,7 +150,7 @@ function makeXlsx() {
   await page.getByRole('button', { name: 'Save bid form' }).click();
   const d1 = await dl1; check(/Bid form - .*\.html$/.test(d1.suggestedFilename()), 'bid form downloads as HTML (' + d1.suggestedFilename() + ')');
   await page.getByRole('radio', { name: 'Budget export' }).click();
-  await page.getByRole('button', { name: 'Download CSV' }).click();
+  await page.getByRole('button', { name: 'Export budget' }).first().click();
   const dl2 = page.waitForEvent('download');
   await page.getByRole('dialog').getByRole('button', { name: 'Download CSV' }).click();
   const d2 = await dl2; const csvPath = await d2.path(); const csv = fs.readFileSync(csvPath, 'utf8');
@@ -145,6 +166,19 @@ function makeXlsx() {
   await page.waitForTimeout(100);
   await page.getByRole('button', { name: /Add 2/ }).click(); await page.waitForTimeout(200);
   check((await page.locator('.m3-grid__tr').count()) === rowsBefore + 2, 'pasting with a header row adds 2 items');
+  await page.getByRole('button', { name: 'Paste items' }).click();
+  await page.getByLabel('Rows to import').fill('Furnish and install 36 IN RCP 1200 LF');
+  await page.waitForTimeout(100);
+  const preview = await page.getByRole('dialog').innerText();
+  check(/Furnish and install 36 IN RCP\t1,200/.test(preview), 'a pipe size in the description is not read as the quantity');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(100);
+  // "18,400" is a number in the pay item dialog
+  await page.getByRole('button', { name: 'Pay item' }).click();
+  await page.getByLabel('Description').fill('Comma test');
+  await page.getByLabel('Bid quantity').fill('18,400');
+  check(!(await page.getByRole('dialog').getByRole('button', { name: 'Add', exact: true }).isDisabled()), 'a quantity typed with a comma is accepted');
+  await page.getByRole('dialog').getByRole('button', { name: 'Add', exact: true }).click(); await page.waitForTimeout(200);
+  check((await page.getByRole('row', { name: /Comma test/ }).getByText('18,400').count()) === 1, 'the comma quantity lands on the sheet as 18,400');
 
   // csv file import through the file picker
   const csvFile = path.join(__dirname, 'tmp-items.csv'); fs.writeFileSync(csvFile, 'Code,Description,Qty,Unit\n02843,Guardrail terminal,4,EA\n');
@@ -154,6 +188,16 @@ function makeXlsx() {
   check((await page.getByRole('button', { name: /Add 1 pay item/ }).count()) === 1, 'CSV file import parses 1 item');
   await page.getByRole('button', { name: /Add 1 pay item/ }).click(); await page.waitForTimeout(200);
   fs.unlinkSync(csvFile);
+
+  // new bid: an impossible date is refused
+  await page.getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(200);
+  await page.getByRole('button', { name: 'New bid' }).first().click();
+  await page.getByLabel('Project name').fill('Date test');
+  await page.getByLabel(/Owner/).fill('UDOT');
+  check(await page.getByRole('button', { name: 'Create' }).isDisabled(), 'Create waits for a due date');
+  await page.getByLabel('Bids due').fill('2026-11-20');
+  check(!(await page.getByRole('button', { name: 'Create' }).isDisabled()), 'a date picked in the date field enables Create');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(100);
 
   // library: rates from their parts, a crew built from people and machines
   await page.getByRole('button', { name: 'Library' }).click(); await page.waitForTimeout(200);
@@ -166,6 +210,17 @@ function makeXlsx() {
   await page.getByRole('dialog').getByLabel('Fuel').fill('5.5');
   await page.getByRole('dialog').getByRole('button', { name: 'Add', exact: true }).click(); await page.waitForTimeout(200);
   check((await page.getByRole('row', { name: /Test roller/ }).getByText('$35.50').count()) === 1, 'a machine rate is ownership + operating + fuel ($35.50)');
+  const dozer = page.getByRole('row', { name: /Dozer/ }).first();
+  const rateCells = (await dozer.innerText()).match(/\$[\d,]+\.\d\d/g);
+  await dozer.getByRole('button', { name: /^Ownership, / }).click();
+  await page.keyboard.type('10'); await page.keyboard.press('Enter'); await page.waitForTimeout(250);
+  check(rateCells && (await page.getByRole('row', { name: /Dozer/ }).first().innerText()).includes(rateCells[0]), 'typing ownership on a rate-only machine keeps its hourly rate');
+  await page.getByRole('tab', { name: 'Labor' }).click();
+  await page.getByRole('button', { name: 'Paste from spreadsheet' }).click();
+  await page.getByLabel('Rows to import').fill('Classification\tWage\tBurden\nImported foreman\t$40.00\t50%');
+  await page.waitForTimeout(100);
+  check((await page.getByRole('dialog').getByText('$60.00').count()) === 1, 'pasted burden "50%" is kept (rate $60.00)');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(100);
   await page.getByRole('tab', { name: 'Labor' }).click();
   const rateBefore = await page.getByRole('row').nth(1).innerText();
   await page.getByRole('button', { name: /^Base wage, / }).first().click();
@@ -194,6 +249,17 @@ function makeXlsx() {
   check((await page.locator('.m3-navbar').count()) === 1, 'phone width shows the bottom navigation bar');
   check(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'no horizontal page scroll at phone width');
   await shot('07-phone');
+
+  // open another bid, undo, then edit: the edit stays on the bid on screen and nothing crashes
+  await page.setViewportSize({ width: 1440, height: 900 }); await page.waitForTimeout(200);
+  await page.getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(200);
+  await page.getByRole('row', { name: /SR-7 Mill/ }).click(); await page.waitForTimeout(300);
+  await page.locator('.gl-appbar').click({ position: { x: 600, y: 30 } });
+  await page.keyboard.press('Control+z'); await page.waitForTimeout(200);
+  const tBefore = await total();
+  await page.getByRole('button', { name: /^Quantity, / }).nth(3).click();
+  await page.keyboard.press('Control+A'); await page.keyboard.type('777'); await page.keyboard.press('Enter'); await page.waitForTimeout(250);
+  check((await page.locator('.gl-app').count()) === 1 && (await total()) !== tBefore, 'editing after an undo changes the bid on screen and does not crash');
 
   // reload keeps the demo state
   await page.setViewportSize({ width: 1440, height: 900 });
