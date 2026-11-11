@@ -1,0 +1,16 @@
+# Dependabot keeps the libraries current: one grouped pull request a week at most,
+# which CI tests like any other change.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      all-updates:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

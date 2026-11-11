@@ -86,4 +86,4 @@ Two ways in, both optional:
 
 ## Design system
 
-The runtime in `src/ds/` is generated from the Gradeline design system artifact. To change colors, type or components, change the design system and re-vendor `tokens.css`, `bundle.css` and `bundle.js`; don't hand-edit them here.
+The runtime in `src/ds/` is generated from the Gradeline design system artifact. To change colors, type or components, change the design system and re-vendor `tokens.css`, `bundle.css` and `bundle.js`; don't hand-edit them here, and bump the date in `src/ds/VERSION.md` when you do. A test (`test/tokens.mjs`) fails the build if app code uses a raw color instead of a design-system token, so the system can't drift quietly.
