@@ -349,11 +349,32 @@ function makeXlsx() {
   await shot('07-phone');
   // every table on a phone: the page itself never scrolls sideways, and the name column leaves room for the numbers
   const phoneFit = async (sel) => page.evaluate((sel) => { const c = document.querySelector('.gl-content') || document.documentElement; const g = document.querySelector(sel); const th = g && g.querySelector('thead th'); return { over: c.scrollWidth - c.clientWidth, first: th ? th.getBoundingClientRect().width / g.getBoundingClientRect().width : 0, inner: g ? g.scrollHeight - g.clientHeight : -1 }; }, sel);
-  await page.locator('.m3-navbar').getByRole('button', { name: 'Library' }).click(); await page.waitForTimeout(300);
-  let fit = await phoneFit('.gl-library .m3-grid');
-  check(fit.over <= 1 && fit.first > 0 && fit.first < 0.6, 'phone: the library stays inside the screen and its tables scroll on their own');
+  const inView = async loc => { const b = await loc.boundingBox(); const vp = page.viewportSize(); return !!b && b.x >= -1 && b.x + b.width <= vp.width + 1 && b.y >= -1 && b.y + b.height <= vp.height + 1; };
+  // phone: Bids and the Library are lists (one row per record, tap to open); nothing scrolls sideways
   await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
-  await page.getByRole('row', { name: /SR-7 Mill/ }).click(); await page.waitForTimeout(400);
+  const bidCount = await page.locator('.m3-dlist__item').count();
+  check((await page.locator('.gl-screen .m3-grid').count()) === 0 && bidCount >= 5, 'phone: the bids are a list, not a table (' + bidCount + ' rows)');
+  const firstBid = page.locator('.m3-dlist__item').first();
+  check((await firstBid.locator('.m3-status').count()) >= 1 && (await firstBid.locator('.m3-dlist__trail').count()) === 1 && await page.evaluate(() => { const li = document.querySelector('.m3-dlist__item'); const t = li.querySelector('.m3-dlist__trail').getBoundingClientRect(); return t.right <= window.innerWidth && t.left >= 0; }), 'phone: each bid shows its status and total without scrolling sideways');
+  await page.getByRole('button', { name: 'New bid' }).click(); await page.waitForTimeout(200);
+  check((await page.getByRole('dialog').getByLabel('Project name').count()) === 1, 'phone: the floating New bid button opens the new bid form');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  await page.getByRole('button', { name: /^Actions for SR-7/ }).click(); await page.waitForTimeout(150);
+  check((await page.getByRole('menuitem', { name: 'Duplicate' }).count()) === 1 && (await page.locator('.gl-estimate').count()) === 0, 'phone: the row menu opens without opening the bid');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  await page.locator('.m3-navbar').getByRole('button', { name: 'Library' }).click(); await page.waitForTimeout(300);
+  check((await page.locator('.gl-library .m3-dlist__item').count()) >= 5 && await page.evaluate(() => { const c = document.querySelector('.gl-content'); return c.scrollWidth - c.clientWidth <= 1; }), 'phone: the library crews are a list that stays inside the screen');
+  check(/\$[\d,]+\s*\/ day/.test(await page.locator('.gl-library .m3-dlist__item .m3-dlist__trail').first().innerText()), 'phone: each crew shows its day rate');
+  await page.getByRole('tab', { name: 'Labor' }).click(); await page.waitForTimeout(200);
+  await page.locator('.m3-dlist').getByRole('button', { name: 'Operator', exact: true }).click(); await page.waitForTimeout(250);
+  check((await page.getByRole('dialog').getByLabel('Classification').inputValue()) === 'Operator', 'phone: tapping a library row opens its form');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  await page.getByRole('tab', { name: 'Materials' }).click(); await page.waitForTimeout(200);
+  let fit = await phoneFit('.gl-library .m3-grid');
+  check(fit.over <= 1 && fit.first > 0 && fit.first < 0.6, 'phone: materials stay a short table that fits');
+  await page.getByRole('tab', { name: 'Crews' }).click(); await page.waitForTimeout(150);
+  await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
+  await page.locator('.m3-dlist').getByRole('button', { name: /^SR-7 Mill/ }).click(); await page.waitForTimeout(400);
   await page.getByRole('tab', { name: /Sheet/ }).click(); await page.waitForTimeout(300);
   await shot('07b-phone-sheet');
   fit = await phoneFit('.gl-sheet > .m3-grid');
@@ -361,7 +382,6 @@ function makeXlsx() {
   check(fit.inner <= 1, 'phone: the sheet scrolls with the page, not inside a small box');
 
   // phone: the bid name is whole, all five tabs are on screen, long dialogs keep their buttons in view
-  const inView = async loc => { const b = await loc.boundingBox(); const vp = page.viewportSize(); return !!b && b.x >= -1 && b.x + b.width <= vp.width + 1 && b.y >= -1 && b.y + b.height <= vp.height + 1; };
   check(await page.evaluate(() => { const t = document.querySelector('.gl-estimate__title'); return t.scrollWidth <= t.clientWidth + 1 && t.scrollHeight <= t.clientHeight + 1; }), 'phone: the bid name is not cut off');
   check(await inView(page.getByRole('tab', { name: /Form/ })), 'phone: all five estimate tabs are on screen');
   check((await page.locator('.gl-kpi').count()) === 2 && await inView(page.locator('.gl-kpi').nth(1)), 'phone: margin stays in view next to the total');
@@ -373,10 +393,10 @@ function makeXlsx() {
   await page.keyboard.press('Escape'); await page.waitForTimeout(200);
   check((await page.locator('.m3-ssheet--modal').count()) === 0, 'Escape closes the summary sheet');
   await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
-  await page.getByRole('row', { name: /Alpine Loop/ }).click(); await page.waitForTimeout(300);
+  await page.locator('.m3-dlist').getByRole('button', { name: /^Alpine Loop/ }).click(); await page.waitForTimeout(300);
   check(await inView(page.getByRole('button', { name: 'Paste item list' })) && await inView(page.getByRole('button', { name: 'Start blank' })), 'phone: every way to start an estimate is on screen');
   await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
-  await page.getByRole('row', { name: /SR-7 Mill/ }).click(); await page.waitForTimeout(300);
+  await page.locator('.m3-dlist').getByRole('button', { name: /^SR-7 Mill/ }).click(); await page.waitForTimeout(300);
 
   // open another bid, undo, then edit: the edit stays on the bid on screen and nothing crashes
   await page.setViewportSize({ width: 1440, height: 900 }); await page.waitForTimeout(200);

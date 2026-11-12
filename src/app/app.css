@@ -398,3 +398,19 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
   .gl-library__bar .m3-row { width: 100%; }
   .gl-library__bar .gl-searchbox { flex: 1 1 100%; }
 }
+
+/* ===== phone lists: Bids and the Library draw a DataList under 600px ===== */
+.gl-fab { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(80px + env(safe-area-inset-bottom, 0px)); z-index: 5; }
+.gl-screen--fab { padding-bottom: 96px; } /* the last row clears the floating button */
+.gl-snack.is-compact.has-fab { bottom: calc(148px + env(safe-area-inset-bottom, 0px)); }
+.gl-listcount { margin-bottom: -8px; }
+/* the four tiles sit in one row that scrolls sideways, so the list starts on the first screen */
+.gl-tiles--scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -16px; padding-right: 16px; }
+.gl-tiles--scroll::-webkit-scrollbar { display: none; }
+.gl-tiles--scroll > * { flex: 0 0 150px; }
+@media (max-width: 600px) {
+  /* filter chips: one row that scrolls sideways, cut off at the edge so it reads as scrollable */
+  .gl-filterbar > .m3-row:first-child { flex: 1 1 100%; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -16px; padding-right: 16px; }
+  .gl-filterbar > .m3-row:first-child::-webkit-scrollbar { display: none; }
+  .gl-filterbar > .m3-row:first-child > * { flex: none; }
+}
