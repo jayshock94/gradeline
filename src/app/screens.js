@@ -82,6 +82,14 @@ import * as R from 'react';
     useEffect(function () {
       var el = contentRef.current; if (!el) return;
       el.scrollTop = 0;
+      // phones and short windows: the whole estimate scrolls as one page (app.css). A new tab starts at its top: scrolled no
+      // further than where the tabs (and the pinned total above them, on a phone) meet the top of the screen.
+      var page = el.closest('.gl-content');
+      if (page && getComputedStyle(el).overflowY === 'visible') {
+        var tabsEl = el.previousElementSibling, kpis = el.parentNode.querySelector('.gl-estimate__kpis');
+        var limit = el.getBoundingClientRect().top - page.getBoundingClientRect().top + page.scrollTop - (tabsEl ? tabsEl.offsetHeight : 0) - (kpis && getComputedStyle(kpis).position === 'sticky' ? kpis.offsetHeight : 0);
+        if (page.scrollTop > limit) page.scrollTop = Math.max(0, limit);
+      }
       var target = el.querySelector('.gl-pkg.is-focus') || el.querySelector('.m3-grid__tr.is-selected');
       if (target && (ui.focusPackageId || ui.selectedItemId) && target.scrollIntoView) target.scrollIntoView({ block: 'center' });
     }, [ui.tab, bidId, ui.focusPackageId]);
@@ -848,6 +856,20 @@ import * as R from 'react';
     // a new screen starts at its top, not wherever the last one was scrolled to
     var mainRef = useRef(null);
     useEffect(function () { if (mainRef.current) mainRef.current.scrollTop = 0; }, [ui.screen, ui.bidId]);
+    // iPhones slide the page up to make room for the keyboard and can leave it there when the keyboard closes. The shell never
+    // scrolls, so once no field has the focus, put the page back (left alone while someone has pinched in to zoom).
+    useEffect(function () {
+      function onOut() {
+        setTimeout(function () {
+          var a = document.activeElement, vv = window.visualViewport;
+          if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+          if (vv && vv.scale > 1.01) return;
+          if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+        }, 120);
+      }
+      window.addEventListener('focusout', onOut);
+      return function () { window.removeEventListener('focusout', onOut); };
+    }, []);
 
     /* ----- document actions ----- */
     function curEst(doc) { return doc.estimates[doc.currentBidId]; }
