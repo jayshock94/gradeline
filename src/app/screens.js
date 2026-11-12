@@ -14,6 +14,7 @@ import * as R from 'react';
     var menu = GL.useMenu();
     var filter = ui.bidFilter || 'all';
     var query = (ui.bidQuery || '').trim().toLowerCase();
+    var asList = p.width < 600; // phones: one list row per bid instead of a table that scrolls sideways
     var totals = {};
     doc.bids.forEach(function (b) { if (doc.estimates[b.id]) totals[b.id] = GL.derive(doc, b.id).totals.bidTotal; else totals[b.id] = b.total; });
     var open = doc.bids.filter(function (b) { return ['draft', 'open', 'in-progress', 'review'].indexOf(b.status) >= 0; });
@@ -36,15 +37,16 @@ import * as R from 'react';
       if (act(a) !== act(b)) return act(a) - act(b);
       return act(a) === 0 ? (a.due < b.due ? -1 : 1) : (a.due < b.due ? 1 : -1);
     });
-    var rows = list.map(function (b) { var ds = GL.dueStatus(b); return { id: b.id, name: b.name, location: b.location, owner: b.owner, type: b.type, due: b.due, dueTime: b.dueTime, dueChip: ds, estimator: b.estimator, total: totals[b.id], status: b.status, live: !!doc.estimates[b.id], selected: ui.bidId === b.id, lowBid: b.lowBid, note: b.note }; });
+    var rows = list.map(function (b) { var ds = GL.dueStatus(b); return { id: b.id, name: b.name, location: b.location, owner: b.owner, type: b.type, due: b.due, dueTime: b.dueTime, dueChip: ds, estimator: b.estimator, total: totals[b.id], status: b.status, live: !!doc.estimates[b.id], selected: !asList && ui.bidId === b.id, lowBid: b.lowBid, note: b.note }; });
     var cols = [
-      { key: 'name', header: 'Bid', width: 320, render: function (r) { return h('span', { className: 'gl-bidcell' }, h('span', { className: 'gl-bidcell__name' }, r.name, r.live ? h(M.Icon, { name: 'edit_document', size: 16, className: 'gl-livemark', label: 'Has an estimate' }) : null), h('span', { className: 'gl-bidcell__sub body-small' }, [r.location, r.note].filter(Boolean).join(' · '))); } },
+      { key: 'name', header: 'Bid', width: 320, role: 'title', render: function (r) { return h('span', { className: 'gl-bidcell' }, h('span', { className: 'gl-bidcell__name' }, r.name, r.live ? h(M.Icon, { name: 'edit_document', size: 16, className: 'gl-livemark', label: 'Has an estimate' }) : null), h('span', { className: 'gl-bidcell__sub body-small' }, [r.location, r.note].filter(Boolean).join(' · '))); } },
+      { key: 'where', role: 'subtitle', listOnly: true, listRender: function (r) { return [r.owner, r.location].filter(Boolean).join(' · '); } },
       { key: 'owner', header: 'Owner', width: 200, render: function (r) { return h('span', null, r.owner, h('span', { className: 'gl-dim' }, r.type === 'public' ? ' · public' : ' · private')); } },
-      { key: 'due', header: 'Due', width: 150, render: function (r) { return h('span', { className: 'gl-duecell' }, h('span', { className: 'gl-duecell__date' }, GL.fmtDate(r.due) + (r.dueTime ? ' · ' + r.dueTime : '')), r.dueChip ? h(M.StatusChip, { status: r.dueChip.status, label: r.dueChip.label }) : null); } },
+      { key: 'due', header: 'Due', width: 150, role: 'meta', listRender: function (r) { return r.dueChip ? h(M.StatusChip, { status: r.dueChip.status, label: r.dueChip.label }) : (['draft', 'open', 'in-progress', 'review'].indexOf(r.status) >= 0 ? 'Due ' + GL.fmtDate(r.due) + (r.dueTime ? ' · ' + r.dueTime : '') : GL.fmtDate(r.due)); }, render: function (r) { return h('span', { className: 'gl-duecell' }, h('span', { className: 'gl-duecell__date' }, GL.fmtDate(r.due) + (r.dueTime ? ' · ' + r.dueTime : '')), r.dueChip ? h(M.StatusChip, { status: r.dueChip.status, label: r.dueChip.label }) : null); } },
       { key: 'estimator', header: 'Estimator', width: 110 },
-      { key: 'total', header: 'Bid total', type: 'money', width: 130, render: function (r) { return r.total ? h(Frag, null, h(M.Money, { value: r.total }), r.lowBid ? h('span', { className: 'gl-dim body-small' }, ' low ' + GL.fmtMoney(r.lowBid)) : null) : h('span', { className: 'gl-dim' }, 'not priced'); } },
-      { key: 'status', header: 'Status', width: 130, render: function (r) { return h(M.StatusChip, { status: r.status }); } },
-      { key: 'actions', header: '', width: 48, align: 'center', render: function (r) { return h(M.IconButton, { icon: 'more_vert', label: 'Actions for ' + r.name, size: 'xs', onClick: function (e) { e.stopPropagation(); menu.open(e, [
+      { key: 'total', header: 'Bid total', type: 'money', width: 130, role: 'trailing', listRender: function (r) { return r.total ? h(M.Money, { value: r.total }) : h('span', { className: 'gl-dim body-medium' }, 'not priced'); }, render: function (r) { return r.total ? h(Frag, null, h(M.Money, { value: r.total }), r.lowBid ? h('span', { className: 'gl-dim body-small' }, ' low ' + GL.fmtMoney(r.lowBid)) : null) : h('span', { className: 'gl-dim' }, 'not priced'); } },
+      { key: 'status', header: 'Status', width: 130, role: 'status', render: function (r) { return h(M.StatusChip, { status: r.status }); } },
+      { key: 'actions', header: '', width: 48, align: 'center', role: 'actions', render: function (r) { return h(M.IconButton, { icon: 'more_vert', label: 'Actions for ' + r.name, size: asList ? 's' : 'xs', onClick: function (e) { e.stopPropagation(); menu.open(e, [
         { icon: 'edit', label: 'Edit', onClick: function () { p.openDialog({ kind: 'editbid', bidId: r.id }); } },
         { icon: 'content_copy', label: 'Duplicate', onClick: function () { p.openDialog({ kind: 'dupbid', bidId: r.id }); } },
         { divider: true },
@@ -54,17 +56,19 @@ import * as R from 'react';
     return h('div', { className: 'gl-screen' },
       menu.node,
       ui.hideSampleNote || !p.demo ? null : h(M.Banner, { tone: 'neutral', compact: true, icon: 'science', onClose: function () { api.ui({ hideSampleNote: true }); } }, 'Sample data for a fictional contractor, Cascade Civil Constructors. Change anything; every change can be undone, and the account menu resets it.'),
-      h('div', { className: 'gl-tiles' },
+      // phones skip the tiles (the list is the screen); the two counts that matter ride on their filter chips instead
+      asList ? null : h('div', { className: 'gl-tiles' },
         h(M.StatTile, { label: 'Open bids', value: String(open.length), icon: 'folder_open', supporting: open.filter(function (b) { return b.status === 'in-progress'; }).length + ' in progress', onClick: function () { api.ui({ bidFilter: 'open' }); } }),
         h(M.StatTile, { label: 'Due this week', value: String(dueWeek.length), tone: dueWeek.length ? 'warning' : 'default', icon: 'schedule', supporting: dueWeek.length ? 'next: ' + dueWeek.sort(function (a, b) { return a.due < b.due ? -1 : 1; })[0].name.split(',')[0] : 'nothing due', onClick: function () { api.ui({ bidFilter: 'due' }); } }),
         h(M.StatTile, { label: 'Win rate', value: String(winRate), unit: '%', supporting: won.length + ' of ' + decided.length + ' decided', icon: 'emoji_events', onClick: function () { api.ui({ screen: 'insights' }); } }),
         h(M.StatTile, { label: 'Won this year', value: money(backlog), icon: 'payments', supporting: wonYear.length + ' job' + (wonYear.length === 1 ? '' : 's') })),
       h('div', { className: 'gl-filterbar' },
-        h('div', { className: 'm3-row' }, [['all', 'All'], ['open', 'Open'], ['due', 'Due this week'], ['submitted', 'Submitted'], ['won', 'Won'], ['lost', 'Lost']].map(function (f) { return h(M.Chip, { key: f[0], variant: 'filter', label: f[1], selected: filter === f[0], onClick: function () { api.ui({ bidFilter: f[0] }); } }); })),
+        h('div', { className: 'm3-row' }, [['all', 'All'], ['open', 'Open' + (asList ? ' · ' + open.length : '')], ['due', 'Due this week' + (asList ? ' · ' + dueWeek.length : '')], ['submitted', 'Submitted'], ['won', 'Won'], ['lost', 'Lost']].map(function (f) { return h(M.Chip, { key: f[0], variant: 'filter', label: f[1], selected: filter === f[0], onClick: function () { api.ui({ bidFilter: f[0] }); } }); })),
         h('div', { className: 'm3-row gl-filterbar__right' },
           h(M.Search, { className: 'gl-searchbox', placeholder: 'Find a bid', label: 'Find a bid', value: ui.bidQuery || '', onChange: function (v) { api.ui({ bidQuery: v }); }, trailing: (ui.bidQuery || '') ? h(M.IconButton, { icon: 'close', size: 'xs', label: 'Clear search', onClick: function () { api.ui({ bidQuery: '' }); } }) : null }),
           h(M.Button, { variant: 'filled', icon: 'add', size: 's', onClick: function () { p.openDialog({ kind: 'newbid' }); } }, 'New bid'))),
-      h(GL.Grid, { label: 'Bids', columns: cols, rows: rows, density: 'standard', onSelect: function (r) { p.openBid(r.id); },
+      asList && rows.length ? h('div', { className: 'body-small gl-dim gl-listcount' }, rows.length === doc.bids.length ? rows.length + ' bid' + (rows.length === 1 ? '' : 's') : rows.length + ' of ' + doc.bids.length + ' bids') : null,
+      h(GL.Grid, { label: 'Bids', columns: cols, rows: rows, density: 'standard', asList: asList, onSelect: function (r) { p.openBid(r.id); },
         empty: { icon: 'post_add', headline: 'No bids yet', body: 'Start with the project name, the owner and the date bids are due. The estimate comes next.', action: h(M.Button, { icon: 'add', onClick: function () { p.openDialog({ kind: 'newbid' }); } }, 'New bid') },
         filtered: { active: filter !== 'all' || !!query, headline: query ? 'No bids match "' + (ui.bidQuery || '').trim() + '"' : 'No ' + ({ open: 'open bids', due: 'bids due this week', submitted: 'submitted bids', won: 'won bids', lost: 'lost bids' }[filter] || 'bids match'), body: query ? 'Check the spelling, try fewer words, or clear the search.' : 'Nothing in this list has that status right now.', onClear: function () { api.ui({ bidFilter: 'all', bidQuery: '' }); }, clearLabel: query ? 'Clear search' : 'Show all bids' } }));
   }
@@ -78,6 +82,14 @@ import * as R from 'react';
     useEffect(function () {
       var el = contentRef.current; if (!el) return;
       el.scrollTop = 0;
+      // phones and short windows: the whole estimate scrolls as one page (app.css). A new tab starts at its top: scrolled no
+      // further than where the tabs (and the pinned total above them, on a phone) meet the top of the screen.
+      var page = el.closest('.gl-content');
+      if (page && getComputedStyle(el).overflowY === 'visible') {
+        var tabsEl = el.previousElementSibling, kpis = el.parentNode.querySelector('.gl-estimate__kpis');
+        var limit = el.getBoundingClientRect().top - page.getBoundingClientRect().top + page.scrollTop - (tabsEl ? tabsEl.offsetHeight : 0) - (kpis && getComputedStyle(kpis).position === 'sticky' ? kpis.offsetHeight : 0);
+        if (page.scrollTop > limit) page.scrollTop = Math.max(0, limit);
+      }
       var target = el.querySelector('.gl-pkg.is-focus') || el.querySelector('.m3-grid__tr.is-selected');
       if (target && (ui.focusPackageId || ui.selectedItemId) && target.scrollIntoView) target.scrollIntoView({ block: 'center' });
     }, [ui.tab, bidId, ui.focusPackageId]);
@@ -131,6 +143,9 @@ import * as R from 'react';
     var tab = ui.libTab || 'crews';
     var d = p.d;
     var menu = GL.useMenu();
+    var asList = p.width < 600; // phones: a list row per record; tap one to open its form
+    function tapRow(kind) { return function (r) { p.openDialog({ kind: 'libedit', target: kind, id: r.id }); }; }
+    function usedLine(kind, id) { var n = usedBy(doc, kind, id); return n ? 'used by ' + n + ' crew' + (n === 1 ? '' : 's') : 'not in a crew yet'; }
     var q = (ui.libQuery || '').trim().toLowerCase();
     // registers read best in a predictable order, and a search beats scrolling once they grow
     function byName(a, b) { return String(a.name || '').localeCompare(String(b.name || '')); }
@@ -143,9 +158,9 @@ import * as R from 'react';
       p.toast('Deleted ' + rec.name + '.', 'Undo', api.undo);
     }
     function actions(kind) {
-      return { key: 'actions', header: '', width: 40, align: 'center', render: function (r) {
+      return { key: 'actions', header: '', width: 40, align: 'center', role: 'actions', render: function (r) {
         var rec = lib[kind].find(function (x) { return x.id === r.id; });
-        return h(M.IconButton, { icon: 'more_vert', label: 'Actions for ' + r.name, size: 'xs', onClick: function (e) { e.stopPropagation(); menu.open(e, [{ icon: 'edit', label: 'Edit', onClick: function () { p.openDialog({ kind: 'libedit', target: kind, id: r.id }); } }, { divider: true }, { icon: 'delete', label: 'Delete', onClick: function () { remove(kind, rec); } }], 'Actions'); } });
+        return h(M.IconButton, { icon: 'more_vert', label: 'Actions for ' + r.name, size: asList ? 's' : 'xs', onClick: function (e) { e.stopPropagation(); menu.open(e, [{ icon: 'edit', label: 'Edit', onClick: function () { p.openDialog({ kind: 'libedit', target: kind, id: r.id }); } }, { divider: true }, { icon: 'delete', label: 'Delete', onClick: function () { remove(kind, rec); } }], 'Actions'); } });
       } };
     }
     // one field on one record; labor and equipment keep `rate` in step with its parts
@@ -174,30 +189,32 @@ import * as R from 'react';
     }
     var money2 = function (key, header, hint, editable) { return { key: key, header: header, hint: hint, type: 'money', decimals: 2, width: 120, editable: editable, placeholder: '–' }; };
     var grids = {
-      crews: h(GL.Grid, { label: 'Crews', density: 'standard', filtered: libFiltered(), rows: lib.crews.slice().sort(byName).map(function (c) { var r = d.crewRates[c.id] || GL.crewRate(c, lib); return { id: c.id, name: c.name, makeup: c.labor.map(function (x) { var l = lib.labor.find(function (y) { return y.id === x[0]; }); return x[1] + ' ' + (l ? l.name.toLowerCase() : '?'); }).join(', '), iron: c.equipment.map(function (x) { var e = lib.equipment.find(function (y) { return y.id === x[0]; }); return x[1] + ' ' + (e ? e.name : '?'); }).join(', '), hours: c.hours || 8, laborDay: r.laborPerDay, equipDay: r.equipPerDay, perDay: r.perDay }; }).filter(matches), columns: [
-        { key: 'name', header: 'Crew', width: 150 }, { key: 'makeup', header: 'People', width: 160 }, { key: 'iron', header: 'Equipment', width: 176 },
-        { key: 'hours', header: 'Hours/day', type: 'number', width: 80, editable: true }, { key: 'laborDay', header: 'Labor/day', type: 'money', category: 'labor', width: 92 }, { key: 'equipDay', header: 'Equip/day', type: 'money', category: 'equipment', width: 92 }, { key: 'perDay', header: 'Crew/day', type: 'money', width: 92 }, actions('crews')],
+      crews: h(GL.Grid, { label: 'Crews', density: 'standard', asList: asList, onListSelect: tapRow('crews'), filtered: libFiltered(), rows: lib.crews.slice().sort(byName).map(function (c) { var r = d.crewRates[c.id] || GL.crewRate(c, lib); return { id: c.id, name: c.name, makeup: c.labor.map(function (x) { var l = lib.labor.find(function (y) { return y.id === x[0]; }); return x[1] + ' ' + (l ? l.name.toLowerCase() : '?'); }).join(', '), iron: c.equipment.map(function (x) { var e = lib.equipment.find(function (y) { return y.id === x[0]; }); return x[1] + ' ' + (e ? e.name : '?'); }).join(', '), hours: c.hours || 8, laborDay: r.laborPerDay, equipDay: r.equipPerDay, perDay: r.perDay }; }).filter(matches), columns: [
+        { key: 'name', header: 'Crew', width: 150, role: 'title' }, { key: 'makeup', header: 'People', width: 160, role: 'subtitle' }, { key: 'iron', header: 'Equipment', width: 176, role: 'subtitle' },
+        { key: 'hours', header: 'Hours/day', type: 'number', width: 80, editable: true }, { key: 'laborDay', header: 'Labor/day', type: 'money', category: 'labor', width: 92 }, { key: 'equipDay', header: 'Equip/day', type: 'money', category: 'equipment', width: 92 }, { key: 'perDay', header: 'Crew/day', type: 'money', width: 92, role: 'trailing', listSuffix: '/ day' }, actions('crews')],
         empty: { icon: 'groups', headline: 'No crews yet', body: 'A crew is people plus machines. Add one and the day rate adds up as you build it.', action: h(M.Button, { icon: 'add', onClick: function () { p.openDialog({ kind: 'libedit', target: 'crews' }); } }, 'Add crew') },
         onEdit: function (row, col, value) { if (!(value > 0) || value > 24) { p.toast('Hours per day go from 1 to 24.'); return; } api.update(function (dd) { dd.library.crews.find(function (c) { return c.id === row.id; }).hours = value; }, { title: 'Set ' + row.name + ' to ' + value + ' hours/day', icon: 'schedule' }); } }),
-      labor: h(GL.Grid, { label: 'Labor rates', density: 'standard', filtered: libFiltered(), rows: lib.labor.slice().sort(byName).map(function (l) { var rate = GL.laborRate(l); return { id: l.id, name: l.name, wage: l.wage, burden: l.wage != null ? l.burden || 0 : null, rate: rate, day: rate * 8, built: l.wage != null }; }).filter(matches), columns: [
-        { key: 'name', header: 'Classification', width: 220 },
+      labor: h(GL.Grid, { label: 'Labor rates', density: 'standard', asList: asList, onListSelect: tapRow('labor'), filtered: libFiltered(), rows: lib.labor.slice().sort(byName).map(function (l) { var rate = GL.laborRate(l); return { id: l.id, name: l.name, wage: l.wage, burden: l.wage != null ? l.burden || 0 : null, rate: rate, day: rate * 8, built: l.wage != null }; }).filter(matches), columns: [
+        { key: 'name', header: 'Classification', width: 220, role: 'title' },
+        { key: 'how', role: 'subtitle', listOnly: true, listRender: function (r) { return (r.built ? 'Base ' + GL.fmtMoney(r.wage, 2) + ', burden ' + GL.fmtNum(r.burden, 1) + '%' : 'Burdened rate') + ' · ' + usedLine('labor', r.id); } },
         money2('wage', 'Base wage', 'per hour', true),
         { key: 'burden', header: 'Burden', hint: 'taxes, insurance, fringe', type: 'percent', decimals: 1, width: 130, placeholder: '–', editable: function (r) { return r.built; } },
-        money2('rate', 'Burdened rate', 'per hour', function (r) { return !r.built; }),
+        Object.assign(money2('rate', 'Burdened rate', 'per hour', function (r) { return !r.built; }), { role: 'trailing', listSuffix: '/ hr' }),
         { key: 'day', header: '8-hour day', type: 'money', width: 110 }, actions('labor')],
         empty: { icon: 'engineering', headline: 'No labor classes yet', body: 'Operators, laborers, foremen: a base wage plus burden, or just the burdened rate.', action: libEmptyActions('labor', 'Add labor class') },
         onEdit: function (row, col, value) { setField('labor', row, col.key, value); } }),
-      equipment: h(GL.Grid, { label: 'Equipment rates', density: 'standard', filtered: libFiltered(), rows: lib.equipment.slice().sort(byName).map(function (e) { var rate = GL.equipRate(e); var built = e.own != null || e.op != null || e.fuel != null; return { id: e.id, name: e.name, own: built ? e.own || 0 : null, op: built ? e.op || 0 : null, fuel: built ? e.fuel || 0 : null, rate: rate, day: rate * 8, built: built }; }).filter(matches), columns: [
-        { key: 'name', header: 'Machine', width: 220 },
+      equipment: h(GL.Grid, { label: 'Equipment rates', density: 'standard', asList: asList, onListSelect: tapRow('equipment'), filtered: libFiltered(), rows: lib.equipment.slice().sort(byName).map(function (e) { var rate = GL.equipRate(e); var built = e.own != null || e.op != null || e.fuel != null; return { id: e.id, name: e.name, own: built ? e.own || 0 : null, op: built ? e.op || 0 : null, fuel: built ? e.fuel || 0 : null, rate: rate, day: rate * 8, built: built }; }).filter(matches), columns: [
+        { key: 'name', header: 'Machine', width: 220, role: 'title' },
+        { key: 'how', role: 'subtitle', listOnly: true, listRender: function (r) { return (r.built ? 'Own ' + GL.fmtMoney(r.own, 2) + ', operate ' + GL.fmtMoney(r.op, 2) + ', fuel ' + GL.fmtMoney(r.fuel, 2) : 'Hourly rate') + ' · ' + usedLine('equipment', r.id); } },
         money2('own', 'Ownership', 'per hour', true), money2('op', 'Operating', 'repairs, wear', true), money2('fuel', 'Fuel', 'per hour', true),
-        money2('rate', 'Hourly rate', 'total', function (r) { return !r.built; }),
+        Object.assign(money2('rate', 'Hourly rate', 'total', function (r) { return !r.built; }), { role: 'trailing', listSuffix: '/ hr' }),
         { key: 'day', header: '8-hour day', type: 'money', width: 110 }, actions('equipment')],
         empty: { icon: 'agriculture', headline: 'No machines yet', body: 'Ownership, operating and fuel per hour, or just the hourly rate.', action: libEmptyActions('equipment', 'Add machine') },
         onEdit: function (row, col, value) { setField('equipment', row, col.key, value); } }),
       materials: h(GL.Grid, { label: 'Materials', density: 'standard', filtered: libFiltered(), rows: lib.materials.slice().sort(byName).map(function (m) { return { id: m.id, name: m.name, unit: m.unit, cost: m.cost }; }).filter(matches), columns: [{ key: 'name', header: 'Material', width: 260 }, { key: 'unit', header: 'Unit', width: 80, align: 'center' }, { key: 'cost', header: 'Cost', type: 'money', decimals: 2, width: 120, editable: true }, actions('materials')],
         empty: { icon: 'inventory_2', headline: 'No materials yet', body: 'Pipe, base, asphalt: a cost per unit that tasks and quotes can use.', action: libEmptyActions('materials', 'Add material') },
         onEdit: function (row, col, value) { setField('materials', row, 'cost', value); } }),
-      vendors: h(GL.Grid, { label: 'Subs and suppliers', density: 'standard', filtered: libFiltered(), rows: lib.vendors.slice().sort(byName).map(function (v) { return { id: v.id, name: v.name, trade: v.trade, kind: v.kind, contact: v.contact, email: v.email, phone: v.phone }; }).filter(matches), columns: [{ key: 'name', header: 'Company', width: 190 }, { key: 'trade', header: 'Trade', width: 150 }, { key: 'kind', header: 'Type', width: 80, render: function (r) { return r.kind === 'supplier' ? 'Supplier' : 'Sub'; } }, { key: 'contact', header: 'Contact', width: 130 }, { key: 'phone', header: 'Phone', width: 120 }, { key: 'email', header: 'Email', width: 200 }, actions('vendors')],
+      vendors: h(GL.Grid, { label: 'Subs and suppliers', density: 'standard', asList: asList, onListSelect: tapRow('vendors'), filtered: libFiltered(), rows: lib.vendors.slice().sort(byName).map(function (v) { return { id: v.id, name: v.name, trade: v.trade, kind: v.kind, contact: v.contact, email: v.email, phone: v.phone }; }).filter(matches), columns: [{ key: 'name', header: 'Company', width: 190, role: 'title' }, { key: 'trade', header: 'Trade', width: 150, role: 'subtitle' }, { key: 'kind', header: 'Type', width: 80, role: 'subtitle', listRender: function (r) { return r.kind === 'supplier' ? 'Supplier' : 'Sub'; }, render: function (r) { return r.kind === 'supplier' ? 'Supplier' : 'Sub'; } }, { key: 'contact', header: 'Contact', width: 130, role: 'meta' }, { key: 'phone', header: 'Phone', width: 120, role: 'meta' }, { key: 'email', header: 'Email', width: 200 }, actions('vendors')],
         empty: { icon: 'storefront', headline: 'No subs or suppliers yet', body: 'The companies you get prices from. Their quotes line up side by side on each bid.', action: libEmptyActions('vendors', 'Add company') } })
     };
     var anyEstimate = Object.keys(doc.estimates).some(function (k) { return doc.estimates[k] && doc.estimates[k].items && doc.estimates[k].items.length; });
@@ -815,6 +832,7 @@ import * as R from 'react';
 
     function toast(msg, action, onAction) { snack[1]({ id: Date.now(), msg: msg, action: action, onAction: onAction }); }
     useEffect(function () { if (!snack[0]) return; var t = setTimeout(function () { snack[1](null); }, 6000); return function () { clearTimeout(t); }; }, [snack[0]]);
+    useEffect(function () { if (dialog[0]) snack[1](null); }, [dialog[0]]); // opening a dialog clears the last toast, which would sit on its buttons on a phone
 
     // keyboard
     useEffect(function () {
@@ -838,6 +856,20 @@ import * as R from 'react';
     // a new screen starts at its top, not wherever the last one was scrolled to
     var mainRef = useRef(null);
     useEffect(function () { if (mainRef.current) mainRef.current.scrollTop = 0; }, [ui.screen, ui.bidId]);
+    // iPhones slide the page up to make room for the keyboard and can leave it there when the keyboard closes. The shell never
+    // scrolls, so once no field has the focus, put the page back (left alone while someone has pinched in to zoom).
+    useEffect(function () {
+      function onOut() {
+        setTimeout(function () {
+          var a = document.activeElement, vv = window.visualViewport;
+          if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+          if (vv && vv.scale > 1.01) return;
+          if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+        }, 120);
+      }
+      window.addEventListener('focusout', onOut);
+      return function () { window.removeEventListener('focusout', onOut); };
+    }, []);
 
     /* ----- document actions ----- */
     function curEst(doc) { return doc.estimates[doc.currentBidId]; }

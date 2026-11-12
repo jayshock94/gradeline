@@ -4,7 +4,7 @@ html, body { height: 100%; }
 body { margin: 0; background: var(--surface); color: var(--on-surface); font-family: var(--font-plain); font-size: 14px; line-height: 20px; letter-spacing: 0.25px; -webkit-font-smoothing: antialiased; }
 #root, #gl-root { height: 100%; }
 .gl-app { display: flex; height: 100%; background: var(--surface); color: var(--on-surface); overflow: hidden; }
-.gl-rail { flex: none; border-right: 1px solid var(--outline-variant); padding-top: 12px; }
+.gl-rail { flex: none; border-right: 1px solid var(--outline-variant); padding-top: 12px; margin-left: env(safe-area-inset-left, 0px); }
 .gl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; }
 .gl-appbar { flex: none; background: var(--surface); box-shadow: inset 0 -1px 0 var(--outline-variant); padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); }
 .gl-appbar__title { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; }
@@ -13,7 +13,14 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-appbar__screen { color: var(--on-surface-variant); font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gl-avatar { width: 32px; height: 32px; font-size: 13px; background: var(--secondary-container); color: var(--on-secondary-container); }
 .gl-content { flex: 1; min-height: 0; overflow: auto; }
-.gl-navbar { flex: none; }
+.gl-navbar { flex: none; height: calc(64px + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
+/* The page behind the app never scrolls: every screen scrolls inside the shell. Left alone, a swipe that starts at the
+   end of a list drags the whole page instead (the bounce on an iPhone, pull-to-refresh on Android), and the list
+   stops answering until the page settles. Sign-in, the landing page and the policy pages have no shell and scroll as usual. */
+html:has(.gl-app), html:has(.gl-app) body { overflow: hidden; overscroll-behavior-y: none; }
+.gl-app { touch-action: manipulation; } /* pinch still zooms; a quick second tap no longer does */
+/* a finger has no hover: after a tap the row would stay tinted until the next tap somewhere else */
+@media (hover: none) { .m3-dlist__item.is-clickable:not(.is-selected):hover { background: none; } }
 .gl-screen { padding: 20px max(20px, env(safe-area-inset-right, 0px)) 40px max(20px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 16px; max-width: 1400px; }
 .gl-screen--center { align-items: center; justify-content: center; min-height: 60%; }
 .is-compact .gl-screen { padding: 16px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); }
@@ -73,7 +80,8 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-sheet { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; }
 .gl-sheet > .m3-grid { flex: 1; min-height: 240px; }
 .is-compact .gl-sheet__foot { display: none; }
-.gl-estimate__content--fill { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 12px; }
+/* the sheet fills its box and the table scrolls inside it; in a window too short for that, the box scrolls instead of cutting the table off */
+.gl-estimate__content--fill { display: flex; flex-direction: column; overflow: hidden auto; padding-bottom: 12px; }
 .gl-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .gl-toolbar__group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .gl-toolbar__div { height: 24px; margin: 0 4px; }
@@ -237,6 +245,8 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 /* a long form scrolls inside the dialog; Cancel and Save stay in view (the padding keeps labels and focus rings from being clipped) */
 .m3-dialog__content { overflow: auto; min-height: 0; padding: 8px 4px 2px; margin: -8px -4px -2px; }
 .m3-dialog__headline, .m3-dialog__icon, .m3-dialog__actions { flex: none; }
+/* a window too short to pin the title and the buttons (a phone on its side, a very small phone): the whole dialog scrolls instead */
+@media (max-height: 500px) { .m3-dialog { overflow: auto; } .m3-dialog__content { overflow: visible; flex: none; } }
 
 /* compact */
 @media (max-width: 839px) {
@@ -334,9 +344,17 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
   .gl-form__bar .m3-segmented__seg .m3-icon { display: none; } /* three documents fit the phone without their icons */
 }
 /* phones: grids are sized for a desk, so the name column would take the whole screen and hide every number.
-   Cap it (the grid sets widths inline, hence !important) and let the sheet scroll with the page, not inside a small box. */
+   Cap it (the grid sets widths inline, hence !important). */
 @media (max-width: 600px) {
   .m3-grid .m3-grid__th:first-child { width: min(184px, 42vw) !important; min-width: min(184px, 42vw) !important; }
+}
+/* phones, and windows too short to give the estimate a scrolling box of its own: the bid header, the tabs and the tab's
+   content scroll as one page (main is the only scroller), so a thumb anywhere on the screen moves it and nothing is
+   left below a box that cannot scroll. What stays pinned on a phone is set further down (small screens). */
+@media (max-width: 600px), (max-height: 560px) and (max-width: 1199px) {
+  .gl-estimate, .gl-estimate__main { height: auto; }
+  .gl-estimate__content { flex: none; overflow: visible; }
+  .gl-estimate__content--fill { display: block; }
   .gl-sheet { height: auto; }
   .gl-sheet > .m3-grid { flex: none; min-height: 0; }
 }
@@ -397,4 +415,29 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
   .gl-filterbar__right .gl-searchbox { flex: 1 1 auto; }
   .gl-library__bar .m3-row { width: 100%; }
   .gl-library__bar .gl-searchbox { flex: 1 1 100%; }
+}
+
+/* a phone held upright: the bid name scrolls away with the page; the total, the margin and the tabs stay pinned, so the
+   numbers are in view while a quantity changes far down the sheet. (The header's box is dropped so its two rows can be
+   placed on their own; the strip has a fixed height because the tabs pin right under it.) Under 441px of height
+   (a phone on its side, or a keyboard that takes half the window) there is no room to pin anything, so everything scrolls. */
+@media (max-width: 600px) and (min-height: 441px) {
+  .gl-estimate__head { display: contents; }
+  .gl-estimate__titles { flex: none; padding: 12px max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); }
+  .gl-estimate__kpis { flex: none; position: sticky; top: 0; z-index: 5; height: 56px; box-sizing: border-box; padding: 0 max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); background: var(--surface); }
+  .gl-estimate__main > .m3-tabs { position: sticky; top: 55px; z-index: 5; } /* 1px under the strip: no hairline between the two on screens that round half pixels */
+  .gl-peers > .body-small { display: none; } /* the avatars say who is here; the sentence would push the buttons off the strip */
+}
+
+/* ===== phone lists: Bids and the Library draw a DataList under 600px ===== */
+.gl-listcount { margin-bottom: -8px; }
+/* crew builder on a phone: the picker gives way so the remove button stays on screen */
+.gl-crewrow .gl-select { min-width: 0; }
+@media (max-width: 640px) { .gl-crewrow { grid-template-columns: 90px minmax(0, 1fr) 40px; } }
+
+/* ===== touch screens ===== */
+/* iPhones zoom the whole page in when a tapped field's text is under 16px, and leave it zoomed. Three fields here are
+   smaller than that at a desk (table cells, the dropdowns, the paste box), so on iOS only they edit at 16px. */
+@supports (-webkit-touch-callout: none) {
+  .m3-grid .m3-grid__input, .gl-select .gl-select__box select, textarea.gl-textarea { font-size: 16px; }
 }

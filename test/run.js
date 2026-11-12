@@ -1,7 +1,7 @@
 // End-to-end check of the production build in demo mode (no database needed).
 // Usage: npm run build && node test/run.js [--shots]
 // Serves dist/ in-process, drives the app with Playwright, fails on any console error.
-import { chromium } from 'playwright';
+import { chromium, devices } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +33,7 @@ function makeXlsx() {
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push('console: ' + m.text()); });
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('requestfailed', r => { const host = new URL(r.url()).hostname; if (!FONT_HOSTS.includes(host)) errors.push('request failed: ' + r.url() + ' ' + (r.failure() ? r.failure().errorText : '')); });
-  await page.route('**/*', route => {
+  const serve = route => {
     const u = new URL(route.request().url());
     if (u.hostname === 'fonts.googleapis.com' && localFonts) return route.fulfill({ status: 200, contentType: 'text/css', body: fontCss });
     if (FONT_HOSTS.includes(u.hostname)) return route.continue(); // real Google Fonts when no local copies (CI)
@@ -46,7 +46,8 @@ function makeXlsx() {
     let p = path.join(DIST, u.pathname);
     if (!fs.existsSync(p) || fs.statSync(p).isDirectory()) p = path.join(DIST, 'index.html'); // SPA fallback, like vercel.json
     return route.fulfill({ status: 200, contentType: types[path.extname(p)] || 'application/octet-stream', body: fs.readFileSync(p) });
-  });
+  };
+  await page.route('**/*', serve);
   const shot = async name => { if (SHOTS) { await page.waitForTimeout(150); await page.screenshot({ path: path.join(OUT, name + '.png') }); } };
   const check = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!cond) errors.push('check: ' + msg); };
 
@@ -349,19 +350,42 @@ function makeXlsx() {
   await shot('07-phone');
   // every table on a phone: the page itself never scrolls sideways, and the name column leaves room for the numbers
   const phoneFit = async (sel) => page.evaluate((sel) => { const c = document.querySelector('.gl-content') || document.documentElement; const g = document.querySelector(sel); const th = g && g.querySelector('thead th'); return { over: c.scrollWidth - c.clientWidth, first: th ? th.getBoundingClientRect().width / g.getBoundingClientRect().width : 0, inner: g ? g.scrollHeight - g.clientHeight : -1 }; }, sel);
-  await page.locator('.m3-navbar').getByRole('button', { name: 'Library' }).click(); await page.waitForTimeout(300);
-  let fit = await phoneFit('.gl-library .m3-grid');
-  check(fit.over <= 1 && fit.first > 0 && fit.first < 0.6, 'phone: the library stays inside the screen and its tables scroll on their own');
+  const inView = async loc => { const b = await loc.boundingBox(); const vp = page.viewportSize(); return !!b && b.x >= -1 && b.x + b.width <= vp.width + 1 && b.y >= -1 && b.y + b.height <= vp.height + 1; };
+  // phone: Bids and the Library are lists (one row per record, tap to open); nothing scrolls sideways
   await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
-  await page.getByRole('row', { name: /SR-7 Mill/ }).click(); await page.waitForTimeout(400);
+  const bidCount = await page.locator('.m3-dlist__item').count();
+  check((await page.locator('.gl-screen .m3-grid').count()) === 0 && bidCount >= 5, 'phone: the bids are a list, not a table (' + bidCount + ' rows)');
+  const firstBid = page.locator('.m3-dlist__item').first();
+  check((await firstBid.locator('.m3-status').count()) >= 1 && (await firstBid.locator('.m3-dlist__trail').count()) === 1 && await page.evaluate(() => { const li = document.querySelector('.m3-dlist__item'); const t = li.querySelector('.m3-dlist__trail').getBoundingClientRect(); return t.right <= window.innerWidth && t.left >= 0; }), 'phone: each bid shows its status and total without scrolling sideways');
+  // nothing floats over the list, and nothing on the screen is cut off at its right edge
+  check(await page.evaluate(() => { const vw = window.innerWidth; return [...document.querySelectorAll('.gl-screen .m3-stat, .gl-screen .m3-chip, .gl-screen .m3-btn, .gl-screen .m3-search')].every(el => { const b = el.getBoundingClientRect(); return b.width === 0 || (b.left >= -1 && b.right <= vw + 1); }) && getComputedStyle(document.querySelector('.gl-screen .m3-btn')).position !== 'fixed'; }), 'phone: tiles, chips, search and New bid all sit fully on screen');
+  await page.getByRole('button', { name: 'New bid' }).click(); await page.waitForTimeout(200);
+  check((await page.getByRole('dialog').getByLabel('Project name').count()) === 1, 'phone: New bid opens the new bid form');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  await page.getByRole('button', { name: /^Actions for SR-7/ }).click(); await page.waitForTimeout(150);
+  check((await page.getByRole('menuitem', { name: 'Duplicate' }).count()) === 1 && (await page.locator('.gl-estimate').count()) === 0, 'phone: the row menu opens without opening the bid');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  await page.locator('.m3-navbar').getByRole('button', { name: 'Library' }).click(); await page.waitForTimeout(300);
+  check((await page.locator('.gl-library .m3-dlist__item').count()) >= 5 && await page.evaluate(() => { const c = document.querySelector('.gl-content'); return c.scrollWidth - c.clientWidth <= 1; }), 'phone: the library crews are a list that stays inside the screen');
+  check(/\$[\d,]+\s*\/ day/.test(await page.locator('.gl-library .m3-dlist__item .m3-dlist__trail').first().innerText()), 'phone: each crew shows its day rate');
+  await page.getByRole('tab', { name: 'Labor' }).click(); await page.waitForTimeout(200);
+  await page.locator('.m3-dlist').getByRole('button', { name: 'Operator', exact: true }).click(); await page.waitForTimeout(250);
+  check((await page.getByRole('dialog').getByLabel('Classification').inputValue()) === 'Operator', 'phone: tapping a library row opens its form');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  await page.getByRole('tab', { name: 'Materials' }).click(); await page.waitForTimeout(200);
+  let fit = await phoneFit('.gl-library .m3-grid');
+  check(fit.over <= 1 && fit.first > 0 && fit.first < 0.6, 'phone: materials stay a short table that fits');
+  await page.getByRole('tab', { name: 'Crews' }).click(); await page.waitForTimeout(150);
+  await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
+  await page.locator('.m3-dlist').getByRole('button', { name: /^SR-7 Mill/ }).click(); await page.waitForTimeout(400);
   await page.getByRole('tab', { name: /Sheet/ }).click(); await page.waitForTimeout(300);
   await shot('07b-phone-sheet');
   fit = await phoneFit('.gl-sheet > .m3-grid');
   check(fit.over <= 1 && fit.first > 0 && fit.first < 0.6, 'phone: the sheet shows numbers next to the pay item column (' + JSON.stringify(fit) + ')');
   check(fit.inner <= 1, 'phone: the sheet scrolls with the page, not inside a small box');
+  check(await page.evaluate(() => { const m = document.querySelector('.gl-content'); m.scrollTop = 1e6; const last = document.querySelector('.gl-sheet > .m3-grid').getBoundingClientRect(), nav = document.querySelector('.m3-navbar').getBoundingClientRect(); const ok = m.scrollTop > 200 && last.bottom <= nav.top + 1; m.scrollTop = 0; return ok; }), 'phone: the page scrolls all the way to the last row of the sheet');
 
   // phone: the bid name is whole, all five tabs are on screen, long dialogs keep their buttons in view
-  const inView = async loc => { const b = await loc.boundingBox(); const vp = page.viewportSize(); return !!b && b.x >= -1 && b.x + b.width <= vp.width + 1 && b.y >= -1 && b.y + b.height <= vp.height + 1; };
   check(await page.evaluate(() => { const t = document.querySelector('.gl-estimate__title'); return t.scrollWidth <= t.clientWidth + 1 && t.scrollHeight <= t.clientHeight + 1; }), 'phone: the bid name is not cut off');
   check(await inView(page.getByRole('tab', { name: /Form/ })), 'phone: all five estimate tabs are on screen');
   check((await page.locator('.gl-kpi').count()) === 2 && await inView(page.locator('.gl-kpi').nth(1)), 'phone: margin stays in view next to the total');
@@ -373,10 +397,10 @@ function makeXlsx() {
   await page.keyboard.press('Escape'); await page.waitForTimeout(200);
   check((await page.locator('.m3-ssheet--modal').count()) === 0, 'Escape closes the summary sheet');
   await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
-  await page.getByRole('row', { name: /Alpine Loop/ }).click(); await page.waitForTimeout(300);
+  await page.locator('.m3-dlist').getByRole('button', { name: /^Alpine Loop/ }).click(); await page.waitForTimeout(300);
   check(await inView(page.getByRole('button', { name: 'Paste item list' })) && await inView(page.getByRole('button', { name: 'Start blank' })), 'phone: every way to start an estimate is on screen');
   await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
-  await page.getByRole('row', { name: /SR-7 Mill/ }).click(); await page.waitForTimeout(300);
+  await page.locator('.m3-dlist').getByRole('button', { name: /^SR-7 Mill/ }).click(); await page.waitForTimeout(300);
 
   // open another bid, undo, then edit: the edit stays on the bid on screen and nothing crashes
   await page.setViewportSize({ width: 1440, height: 900 }); await page.waitForTimeout(200);
@@ -399,6 +423,99 @@ function makeXlsx() {
   check((await page.locator('h1').innerText()) === 'Privacy policy', 'privacy page opens without signing in');
   await page.goto('https://local.test/terms', { waitUntil: 'load' }); await page.waitForTimeout(200);
   check((await page.locator('h1').innerText()) === 'Terms of service', 'terms page opens without signing in');
+
+  // a wide window that is too short for the sheet: its box scrolls, so the table's last row is not cut off
+  await page.goto('https://local.test/demo', { waitUntil: 'load' }); await page.waitForTimeout(300);
+  await page.setViewportSize({ width: 1440, height: 520 }); await page.waitForTimeout(200);
+  await page.getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(200);
+  await page.getByRole('row', { name: /SR-7 Mill/ }).click(); await page.waitForTimeout(300);
+  await page.getByRole('tab', { name: /Sheet/ }).click(); await page.waitForTimeout(250);
+  check(await page.evaluate(() => { const box = document.querySelector('.gl-estimate__content--fill'), g = document.querySelector('.gl-sheet > .m3-grid'); const scrolls = /auto|scroll/.test(getComputedStyle(box).overflowY); box.scrollTop = 1e6; const ok = scrolls && g.getBoundingClientRect().bottom <= box.getBoundingClientRect().bottom + 1; box.scrollTop = 0; return ok; }), 'short wide window: the sheet\'s box scrolls, so the bottom of the table can be reached');
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // ----- a phone, driven by real finger drags: touch events through the browser's own scrolling, not scripted scroll positions -----
+  // (scripted scrolling cannot tell a screen that scrolls from one that only looks like it should: the sheet once sat in a box no finger could move)
+  const phone = await browser.newContext({ ...devices['iPhone 13'] });
+  const tp = await phone.newPage();
+  tp.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push('console (phone): ' + m.text()); });
+  tp.on('pageerror', e => errors.push('pageerror (phone): ' + e.message));
+  await tp.route('**/*', serve);
+  await tp.goto('https://local.test/demo', { waitUntil: 'load' }); await tp.waitForTimeout(500);
+  const cdp = await phone.newCDPSession(tp);
+  const drag = async (x, y, dx, dy) => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx * i / 8, y: y + dy * i / 8 }] }); await tp.waitForTimeout(12); }
+    for (let i = 0; i < 4; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx, y: y + dy }] }); await tp.waitForTimeout(28); } // hold still: no fling
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await tp.waitForTimeout(160);
+  };
+  const mainTop = () => tp.evaluate(() => Math.round(document.querySelector('.gl-content').scrollTop));
+  const toTop = () => tp.evaluate(() => { document.querySelectorAll('*').forEach(el => { if (el.scrollTop) el.scrollTop = 0; if (el.scrollLeft) el.scrollLeft = 0; }); });
+  const box = async sel => tp.evaluate(sel => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; }, sel);
+  const tvp = tp.viewportSize(), midX = Math.round(tvp.width / 2);
+  const edges = async () => ({ bar: (await box('.gl-appbar')).bottom, nav: (await box('.m3-navbar')).top });
+  // one swipe up from (x, y); true when the page moved
+  const swipeMoves = async (x, y, by = 220) => { const before = await mainTop(); await drag(x, y, 0, -Math.min(by, y - 8)); return (await mainTop()) - before > 40; };
+
+  check(await tp.evaluate(() => { const h = getComputedStyle(document.documentElement), b = getComputedStyle(document.body); return h.overscrollBehaviorY === 'none' && h.overflowY === 'hidden' && b.overscrollBehaviorY === 'none'; }), 'touch: the page behind the app is locked, so a swipe cannot drag the whole app or pull to refresh');
+  let e = await edges();
+  check(await swipeMoves(midX, Math.round((e.bar + e.nav) / 2)), 'touch: a swipe scrolls the bids list');
+  await tp.getByRole('button', { name: /^Actions for / }).first().tap(); await tp.waitForTimeout(200);
+  const menuWasOpen = (await tp.locator('[role=menu]').count()) === 1;
+  await drag(40, Math.round(e.nav - 60), 0, -160); // a thumb on the list, clear of the menu
+  check(menuWasOpen && (await tp.locator('[role=menu]').count()) === 0, 'touch: scrolling the list closes an open row menu instead of leaving it hanging');
+  await toTop();
+  await tp.locator('.m3-dlist').getByRole('button', { name: /^SR-7 Mill/ }).tap(); await tp.waitForTimeout(450);
+  check((await tp.locator('.m3-tooltip').count()) === 0, 'touch: no hover tooltips on a touch screen');
+  // the sheet: every part of the screen scrolls it (the bid header used to be a dead strip, and the sheet itself did not move at all)
+  e = await edges();
+  const starts = [['the bid name', e.bar + 30], ['the tabs', (await box('.gl-estimate .m3-tabs')).top + 30], ['the middle of the sheet', Math.round((e.bar + e.nav) / 2 + 60)], ['the bottom edge', e.nav - 14]];
+  const dead = [];
+  for (const [what, y] of starts) { await toTop(); await tp.waitForTimeout(60); if (!(await swipeMoves(midX, Math.round(y)))) dead.push(what); }
+  check(dead.length === 0, 'touch: a swipe that starts anywhere on the estimate scrolls the sheet' + (dead.length ? ' (nothing moved from: ' + dead.join(', ') + ')' : ''));
+  await toTop();
+  for (let i = 0; i < 30; i++) { if (!(await swipeMoves(midX, e.nav - 40, 300))) break; }
+  const sheetEnd = await box('.gl-sheet > .m3-grid');
+  check(sheetEnd.bottom <= e.nav + 1, 'touch: swiping reaches the last row of the sheet (' + Math.round(sheetEnd.bottom) + ' vs ' + Math.round(e.nav) + ')');
+  const kpi = await box('.gl-kpi--total'), tabsBox = await box('.gl-estimate .m3-tabs');
+  check(kpi.top >= e.bar - 1 && kpi.bottom <= tabsBox.top + 1 && tabsBox.top < e.bar + 80 && tabsBox.bottom < e.nav, 'touch: the bid total and the tabs stay pinned while the sheet scrolls');
+  const grid = await box('.gl-sheet > .m3-grid');
+  await drag(Math.round(tvp.width * 0.7), Math.round(Math.max(grid.top, tabsBox.bottom) + 80), -160, 0);
+  check(await tp.evaluate(() => document.querySelector('.gl-sheet > .m3-grid').scrollLeft > 40 && document.querySelector('.gl-content').scrollLeft === 0 && window.scrollX === 0), 'touch: a sideways swipe moves the table, not the page');
+  // a new tab starts at its top, right under the pinned tabs, and scrolls from there
+  const stuck = [];
+  for (const name of ['Quotes', 'Bid day', 'Checks', 'Form']) {
+    await tp.getByRole('tab', { name: new RegExp(name) }).tap(); await tp.waitForTimeout(300);
+    const t = await box('.gl-estimate .m3-tabs'), c = await box('.gl-estimate__content');
+    const room = await tp.evaluate(() => { const m = document.querySelector('.gl-content'); return m.scrollHeight - m.clientHeight - m.scrollTop; });
+    if (Math.abs(c.top - t.bottom) > 2) stuck.push(name + ' does not start at its top');
+    else if (room > 60 && !(await swipeMoves(midX, Math.round(t.bottom + 40)))) stuck.push(name + ' does not scroll');
+  }
+  check(stuck.length === 0, 'touch: every estimate tab starts at its top and scrolls' + (stuck.length ? ' (' + stuck.join('; ') + ')' : ''));
+  // a long dialog scrolls inside itself; the page behind it stays where it was
+  await tp.getByRole('button', { name: 'Edit bid details' }).tap(); await tp.waitForTimeout(300);
+  const behind = await mainTop(), dlg = await box('.m3-dialog__content');
+  const dlgRoom = await tp.evaluate(() => { const c = document.querySelector('.m3-dialog__content'); return c.scrollHeight - c.clientHeight; });
+  await drag(midX, Math.round((dlg.top + dlg.bottom) / 2 + 40), 0, -150);
+  check(dlgRoom > 8 && await tp.evaluate(room => document.querySelector('.m3-dialog__content').scrollTop >= Math.min(40, room - 2), dlgRoom) && (await mainTop()) === behind, 'touch: a long dialog scrolls inside itself and the page behind stays put');
+  await tp.keyboard.press('Escape'); await tp.waitForTimeout(200);
+  // the phone on its side: nothing is pinned, the whole estimate scrolls, and the sheet's end can be reached
+  await tp.setViewportSize({ width: tvp.height + 86, height: tvp.width - 48 }); await tp.waitForTimeout(400);
+  await tp.getByRole('tab', { name: /Sheet/ }).tap(); await tp.waitForTimeout(300); await toTop();
+  e = await edges();
+  let sideways = await swipeMoves(Math.round((tvp.height + 86) / 2), Math.round(e.nav - 20), 200);
+  for (let i = 0; i < 40; i++) { if (!(await swipeMoves(Math.round((tvp.height + 86) / 2), Math.round(e.nav - 20), 200))) break; }
+  check(sideways && (await box('.gl-sheet > .m3-grid')).bottom <= e.nav + 1, 'touch, phone on its side: the sheet scrolls and its last row can be reached');
+  await tp.getByRole('button', { name: 'Edit bid details' }).tap(); await tp.waitForTimeout(300);
+  for (let i = 0; i < 12; i++) { const d0 = await tp.evaluate(() => document.querySelector('.m3-dialog').scrollTop); await drag(Math.round((tvp.height + 86) / 2), Math.round(tvp.width - 48 - 70), 0, -150); if ((await tp.evaluate(() => document.querySelector('.m3-dialog').scrollTop)) === d0) break; }
+  check(await tp.evaluate(() => { const s = [...document.querySelectorAll('.m3-dialog button')].find(b => b.textContent.trim() === 'Save'); const r = s.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight + 1; }), 'touch, phone on its side: a long dialog scrolls as a whole down to Save');
+  await tp.keyboard.press('Escape'); await tp.waitForTimeout(150);
+  await tp.setViewportSize(tvp); await tp.waitForTimeout(300);
+  // pages outside the app (landing, sign-in, policies) have no shell and scroll the ordinary way
+  await tp.goto('https://local.test/privacy', { waitUntil: 'load' }); await tp.waitForTimeout(300);
+  await drag(midX, Math.round(tvp.height * 0.7), 0, -240);
+  check(await tp.evaluate(() => window.scrollY > 80 && getComputedStyle(document.documentElement).overflowY !== 'hidden'), 'touch: pages outside the app still scroll the ordinary way');
+  await phone.close();
 
   console.log(errors.length ? '\nFAILURES\n' + errors.join('\n') : '\nall good, no console errors');
   await browser.close();

@@ -40,8 +40,9 @@ import * as R from 'react';
     useEffect(function () {
       function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) p.onClose(); }
       function onKey(e) { if (e.key === 'Escape') p.onClose(); }
-      document.addEventListener('mousedown', onDoc); document.addEventListener('keydown', onKey);
-      return function () { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+      // pointerdown, not mousedown: a finger that starts scrolling the page behind the menu closes it too (a swipe sends no mouse events)
+      document.addEventListener('pointerdown', onDoc); document.addEventListener('keydown', onKey);
+      return function () { document.removeEventListener('pointerdown', onDoc); document.removeEventListener('keydown', onKey); };
     }, []);
     var x = p.at.x, y = p.at.y;
     var style = { position: 'fixed', zIndex: 40, top: Math.min(y, window.innerHeight - 320), left: Math.min(x, window.innerWidth - 300) };
@@ -62,10 +63,12 @@ import * as R from 'react';
   GL.useMenu = useMenu;
 
   // Grid: a DataGrid that shows a real empty state when there are no rows.
+  // `asList`: draw it as a DataList (phones). `onListSelect(row)`: what a tap on a list row does when the table itself has no row click.
   // `empty`: { icon, headline, body, action } for "nothing here yet"; `filtered`: { headline, onClear } when a filter or search hid every row.
   function Grid(p) {
     var rows = p.rows || [];
-    if (rows.length || (!p.empty && !p.filtered)) return h(M.DataGrid, p);
+    // on a narrow screen the same columns draw a list (each column's `role` says where it goes); tapping a row opens the record
+    if (rows.length || (!p.empty && !p.filtered)) return p.asList ? h(M.DataList, { label: p.label, columns: p.columns, rows: rows, onSelect: p.onListSelect || p.onSelect, className: p.className }) : h(M.DataGrid, p);
     var f = p.filtered, e = p.empty || {};
     var inner = f && f.active
       ? h(M.EmptyState, { size: 's', icon: 'filter_alt_off', headline: f.headline || 'No matches', body: f.body || 'Nothing here matches that filter.', action: f.onClear ? h(M.Button, { variant: 'tonal', size: 's', onClick: f.onClear }, f.clearLabel || 'Show all') : null })
@@ -91,7 +94,9 @@ import * as R from 'react';
   }
   GL.Mark = Mark;
 
-  function Tip(p) { return h(M.Tooltip, { text: p.text, placement: p.placement || 'bottom' }, p.children); }
+  // A tooltip names an icon on hover. A touch screen has no hover: the tip would open on the tap and hang there, so it is left out.
+  function noHover() { return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(hover: none)').matches; }
+  function Tip(p) { return noHover() ? p.children : h(M.Tooltip, { text: p.text, placement: p.placement || 'bottom' }, p.children); }
   GL.Tip = Tip;
 
   /* ---------- shortcuts dialog ---------- */

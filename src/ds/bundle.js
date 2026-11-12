@@ -1,5 +1,5 @@
 /* Gradeline design system runtime (generated from the Gradeline design system artifact; edit there, then re-vendor). */
-/* @ds-bundle: {"format":4,"namespace":"M3","components":[{"name":"Icon"},{"name":"Button"},{"name":"IconButton"},{"name":"FAB"},{"name":"ExtendedFAB"},{"name":"FABMenu"},{"name":"SegmentedButton"},{"name":"ButtonGroup"},{"name":"SplitButton"},{"name":"Badge"},{"name":"LoadingIndicator"},{"name":"ProgressIndicator"},{"name":"Snackbar"},{"name":"Tooltip"},{"name":"BottomSheet"},{"name":"Card"},{"name":"Carousel"},{"name":"Dialog"},{"name":"Divider"},{"name":"List"},{"name":"ListItem"},{"name":"SideSheet"},{"name":"TopAppBar"},{"name":"NavigationBar"},{"name":"NavigationDrawer"},{"name":"NavigationRail"},{"name":"Tabs"},{"name":"Toolbar"},{"name":"Checkbox"},{"name":"Chip"},{"name":"DatePicker"},{"name":"Menu"},{"name":"Radio"},{"name":"Slider"},{"name":"Switch"},{"name":"TimePicker"},{"name":"TextField"},{"name":"Search"},{"name":"Delta"},{"name":"Money"},{"name":"StatusChip"},{"name":"Banner"},{"name":"Kbd"},{"name":"StatTile"},{"name":"CostBar"},{"name":"HistoryList"},{"name":"SetupSteps"},{"name":"EmptyState"},{"name":"DataGrid"}]} */
+/* @ds-bundle: {"format":4,"namespace":"M3","components":[{"name":"Icon"},{"name":"Button"},{"name":"IconButton"},{"name":"FAB"},{"name":"ExtendedFAB"},{"name":"FABMenu"},{"name":"SegmentedButton"},{"name":"ButtonGroup"},{"name":"SplitButton"},{"name":"Badge"},{"name":"LoadingIndicator"},{"name":"ProgressIndicator"},{"name":"Snackbar"},{"name":"Tooltip"},{"name":"BottomSheet"},{"name":"Card"},{"name":"Carousel"},{"name":"Dialog"},{"name":"Divider"},{"name":"List"},{"name":"ListItem"},{"name":"SideSheet"},{"name":"TopAppBar"},{"name":"NavigationBar"},{"name":"NavigationDrawer"},{"name":"NavigationRail"},{"name":"Tabs"},{"name":"Toolbar"},{"name":"Checkbox"},{"name":"Chip"},{"name":"DatePicker"},{"name":"Menu"},{"name":"Radio"},{"name":"Slider"},{"name":"Switch"},{"name":"TimePicker"},{"name":"TextField"},{"name":"Search"},{"name":"Delta"},{"name":"Money"},{"name":"StatusChip"},{"name":"Banner"},{"name":"Kbd"},{"name":"StatTile"},{"name":"CostBar"},{"name":"HistoryList"},{"name":"SetupSteps"},{"name":"EmptyState"},{"name":"DataGrid"},{"name":"DataList"}]} */
 (function () {
   var React = window.React;
   var h = React.createElement;
@@ -851,7 +851,7 @@
       h(Icon, { name: 'edit', size: 14, className: 'm3-grid__editicon' }));
   }
   function DataGrid(p) {
-    var cols = p.columns || [], rows = p.rows || [];
+    var cols = (p.columns || []).filter(function (c) { return !c.listOnly; }), rows = p.rows || [];
     var density = p.density || 'dense';
     var tableRef = useRef(null);
     function isEditable(col, row) {
@@ -910,6 +910,48 @@
         }))) : null));
   }
 
+  /* ---------------- DataList (the same records as a DataGrid, one list item each, for narrow containers) ---------------- */
+  // Reads the DataGrid's column definitions through each column's `role`:
+  //   title (one) · subtitle (joined with a middle dot) · trailing (one figure, right) · status / meta (the chip line) · actions (the row's menu button).
+  // Columns with no role stay in the grid only; `listOnly` columns show here only. `listRender(row)` overrides `render` for the list.
+  function DataList(p) {
+    var cols = (p.columns || []).filter(function (c) { return !!c.role; }), rows = p.rows || [];
+    function by(role) { return cols.filter(function (c) { return c.role === role; }); }
+    var titleCol = by('title')[0], subs = by('subtitle'), trail = by('trailing')[0], chips = by('status').concat(by('meta')), act = by('actions')[0];
+    function cell(r, c) { return c.listRender ? c.listRender(r, c) : cellText(r, c); }
+    function blank(v) { return v == null || v === '' || v === false; }
+    return h('ul', { className: cx('m3-dlist', p.className), 'aria-label': p.label },
+      rows.length ? rows.map(function (r, ri) {
+        var title = titleCol ? (titleCol.listRender ? titleCol.listRender(r, titleCol) : r[titleCol.key]) : '';
+        var sub = subs.map(function (c) { return c.listRender ? c.listRender(r, c) : r[c.key]; }).filter(function (v) { return !blank(v); });
+        var metas = chips.map(function (c) { return { c: c, v: cell(r, c) }; }).filter(function (x) { return !blank(x.v); });
+        var trailNode = null;
+        if (trail) {
+          var tv = cell(r, trail);
+          if (!blank(tv)) trailNode = h('span', { className: 'm3-dlist__trail' },
+            typeof trail.header === 'string' ? h('span', { className: 'm3-dlist__sr' }, trail.header + ' ') : null, tv,
+            trail.listSuffix ? h('span', { className: 'm3-dlist__unit' }, ' ' + trail.listSuffix) : null);
+        }
+        var titleNode = p.onSelect
+          ? h('button', { type: 'button', className: 'm3-dlist__title', onClick: function () { p.onSelect(r); } }, title)
+          : h('span', { className: 'm3-dlist__title' }, title);
+        return h('li', { key: r.id != null ? r.id : ri, className: cx('m3-dlist__item', p.onSelect && 'is-clickable', r.selected && 'is-selected', r.muted && 'is-muted', r.status && 'has-' + r.status) },
+          h('div', { className: 'm3-dlist__head' },
+            h('div', { className: 'm3-dlist__text' },
+              h('div', { className: 'm3-dlist__titlerow' },
+                r.locked ? h(Icon, { name: 'lock', size: 16, className: 'm3-dlist__flag', label: 'Locked' }) : null,
+                r.status === 'error' ? h(Icon, { name: 'error', size: 16, filled: true, className: 'm3-dlist__flag m3-dlist__flag--error', label: 'Has an error' }) : null,
+                r.status === 'warning' ? h(Icon, { name: 'warning', size: 16, filled: true, className: 'm3-dlist__flag m3-dlist__flag--warning', label: 'Needs attention' }) : null,
+                titleNode),
+              sub.length ? h('span', { className: 'm3-dlist__sub' }, sub.map(function (v, i) { return h(React.Fragment, { key: i }, i ? ' \u00b7 ' : null, v); })) : null),
+            !metas.length ? trailNode : null,
+            act ? h('span', { className: 'm3-dlist__actions' }, cell(r, act)) : (p.onSelect && p.chevron !== false ? h(Icon, { name: 'chevron_right', size: 24, className: 'm3-dlist__chev' }) : null)),
+          metas.length ? h('div', { className: 'm3-dlist__meta' },
+            metas.map(function (x) { return h('span', { key: x.c.key, className: cx('m3-dlist__metacell', x.c.role === 'meta' && 'is-meta') }, x.v); }),
+            trailNode) : null);
+      }) : h('li', { className: 'm3-dlist__empty' }, p.emptyText || 'Nothing here yet'));
+  }
+
   var M3 = {
     Icon: Icon, Button: Button, IconButton: IconButton, FAB: FAB, ExtendedFAB: ExtendedFAB, FABMenu: FABMenu,
     SegmentedButton: SegmentedButton, ButtonGroup: ButtonGroup, SplitButton: SplitButton,
@@ -918,7 +960,7 @@
     TopAppBar: TopAppBar, NavigationBar: NavigationBar, NavigationDrawer: NavigationDrawer, NavigationRail: NavigationRail, Tabs: Tabs, Toolbar: Toolbar,
     Checkbox: Checkbox, Chip: Chip, DatePicker: DatePicker, Menu: Menu, Radio: Radio, Slider: Slider, Switch: Switch, TimePicker: TimePicker,
     TextField: TextField, Search: Search, Delta: Delta,
-    Money: Money, StatusChip: StatusChip, Banner: Banner, Kbd: Kbd, StatTile: StatTile, CostBar: CostBar, HistoryList: HistoryList, SetupSteps: SetupSteps, EmptyState: EmptyState, DataGrid: DataGrid,
+    Money: Money, StatusChip: StatusChip, Banner: Banner, Kbd: Kbd, StatTile: StatTile, CostBar: CostBar, HistoryList: HistoryList, SetupSteps: SetupSteps, EmptyState: EmptyState, DataGrid: DataGrid, DataList: DataList,
     fmtMoney: fmtMoney, fmtNumber: fmtNumber
   };
   window.M3 = Object.assign(window.M3 || {}, M3);
