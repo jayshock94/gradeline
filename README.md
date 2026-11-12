@@ -17,6 +17,7 @@ Built on the Gradeline design system (the design system artifact keeps that name
 | `api/` | Vercel functions: invite email, the MCP server, quote reading, OAuth metadata |
 | `server/` | Code the MCP server shares with the app: the company store and the operations an AI can run |
 | `test/run.js` | End-to-end check of the production build in demo mode (`test/ops.mjs` and `test/api.mjs` cover the server side) |
+| `test/store.mjs` | The signed-in store in a real browser against a stand-in database: what a change saves, and in what order |
 
 Two ways to run it:
 

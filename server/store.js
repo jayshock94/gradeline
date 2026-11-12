@@ -73,27 +73,26 @@ export async function applyUpdate(sb, orgId, user, fn, entry, attempt = 0) {
       const v = await saveScope(sb, orgId, 'library', data, e, snap.library.version);
       if (v == null) throw new Conflict('library');
     }
+    const next = {}; draft.bids.forEach(b => { const { id, ...data } = b; next[id] = data; });
+    const was = {}; base.bids.forEach(b => { const { id, ...data } = b; was[id] = data; });
+    const inserts = Object.keys(next).filter(id => !was[id]);
+    const updates = Object.keys(next).filter(id => was[id] && !same(was[id], next[id]));
+    const deletes = Object.keys(was).filter(id => !next[id]);
+    // new bids first: an estimate row points at its bid
+    if (inserts.length) { const { error } = await sb.from('bids').insert(inserts.map(id => ({ org_id: orgId, id, data: next[id], updated_by: user.id }))); if (error) throw error; }
     for (const id of Object.keys(draft.estimates)) {
       if (same(draft.estimates[id], base.estimates[id])) continue;
       const cur = snap.estimates[id];
       const v = await saveScope(sb, orgId, 'estimate:' + id, draft.estimates[id], e, cur ? cur.version : 0);
       if (v == null) throw new Conflict('estimate:' + id);
     }
-    if (!same(draft.bids, base.bids)) {
-      const next = {}; draft.bids.forEach(b => { const { id, ...data } = b; next[id] = data; });
-      const was = {}; base.bids.forEach(b => { const { id, ...data } = b; was[id] = data; });
-      const inserts = Object.keys(next).filter(id => !was[id]);
-      const updates = Object.keys(next).filter(id => was[id] && !same(was[id], next[id]));
-      const deletes = Object.keys(was).filter(id => !next[id]);
-      if (inserts.length) { const { error } = await sb.from('bids').insert(inserts.map(id => ({ org_id: orgId, id, data: next[id], updated_by: user.id }))); if (error) throw error; }
-      for (const id of updates) {
-        const expected = snap.bids[id].version;
-        const { data, error } = await sb.from('bids').update({ data: next[id], version: expected + 1, updated_by: user.id }).eq('org_id', orgId).eq('id', id).eq('version', expected).select('version');
-        if (error) throw error;
-        if (!data || !data.length) throw new Conflict('bid:' + id);
-      }
-      if (deletes.length) { const { error } = await sb.from('bids').delete().eq('org_id', orgId).in('id', deletes); if (error) throw error; }
+    for (const id of updates) {
+      const expected = snap.bids[id].version;
+      const { data, error } = await sb.from('bids').update({ data: next[id], version: expected + 1, updated_by: user.id }).eq('org_id', orgId).eq('id', id).eq('version', expected).select('version');
+      if (error) throw error;
+      if (!data || !data.length) throw new Conflict('bid:' + id);
     }
+    if (deletes.length) { const { error } = await sb.from('bids').delete().eq('org_id', orgId).in('id', deletes); if (error) throw error; }
   } catch (err) {
     if (err instanceof Conflict && attempt === 0) return applyUpdate(sb, orgId, user, fn, entry, 1);
     if (err instanceof Conflict) throw new Error('Someone else saved this at the same moment. Nothing was changed; try again.');

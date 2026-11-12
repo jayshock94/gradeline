@@ -10,12 +10,12 @@
 //  - Realtime: other people's saves arrive over postgres_changes; presence says who else has the estimate open.
 import * as R from 'react';
 import { GL } from './gl.js';
-import { DEFAULT_UI, clone, nowLabel } from './store-local.js';
+import { DEFAULT_UI, clone, nowLabel, restoreUi } from './store-local.js';
 
 const HISTORY_LIMIT = 80;
 
 function uiKey(orgId) { return 'gradeline.ui.' + orgId; }
-function loadUi(orgId) { try { const raw = localStorage.getItem(uiKey(orgId)); return raw ? { ...DEFAULT_UI, ...JSON.parse(raw) } : { ...DEFAULT_UI }; } catch (e) { return { ...DEFAULT_UI }; } }
+function loadUi(orgId) { try { const raw = localStorage.getItem(uiKey(orgId)); return raw ? restoreUi(JSON.parse(raw)) : { ...DEFAULT_UI }; } catch (e) { return { ...DEFAULT_UI }; } }
 function saveUi(orgId, ui) { try { localStorage.setItem(uiKey(orgId), JSON.stringify(ui)); } catch (e) { /* ignore */ } }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -203,6 +203,19 @@ export function useCloudStore({ supabase, orgId, user, name, initialUi }) {
         commit(c => ({ ...c, library: { data, version: v } }));
         pushHistory('library', { version: v, entry: e, user_id: user.id });
       }
+      // bids: insert / update / delete against the base we started from
+      const next = {}; draft.bids.forEach(b => { const { id, ...data } = b; next[id] = data; });
+      const was = {}; base.bids.forEach(b => { const { id, ...data } = b; was[id] = data; });
+      const inserts = Object.keys(next).filter(id => !was[id]);
+      const updates = Object.keys(next).filter(id => was[id] && !same(was[id], next[id]));
+      const deletes = Object.keys(was).filter(id => !next[id]);
+      // new bids go in first: an estimate row points at its bid, so a bid made together with its estimate (Duplicate) needs the bid to exist
+      if (inserts.length) {
+        const { data, error } = await supabase.from('bids').insert(inserts.map(id => ({ org_id: orgId, id, data: next[id], updated_by: user.id }))).select('id,version');
+        if (error) throw error;
+        const versions = {}; (data || []).forEach(r => { versions[r.id] = r.version; });
+        commit(c => { const bids = { ...c.bids }; inserts.forEach(id => { bids[id] = { data: next[id], version: versions[id] != null ? versions[id] : 1 }; }); return { ...c, bids }; });
+      }
       // estimates: one row per bid
       for (const id of Object.keys(draft.estimates)) {
         if (same(draft.estimates[id], base.estimates[id])) continue;
@@ -213,18 +226,8 @@ export function useCloudStore({ supabase, orgId, user, name, initialUi }) {
         commit(c => ({ ...c, estimates: { ...c.estimates, [id]: { doc: docPart, version: v } } }));
         pushHistory('estimate:' + id, { version: v, entry: e, user_id: user.id });
       }
-      // bids: insert / update / delete against the base we started from
-      if (!same(draft.bids, base.bids)) {
-        const next = {}; draft.bids.forEach(b => { const { id, ...data } = b; next[id] = data; });
-        const was = {}; base.bids.forEach(b => { const { id, ...data } = b; was[id] = data; });
-        const inserts = Object.keys(next).filter(id => !was[id]);
-        const updates = Object.keys(next).filter(id => was[id] && !same(was[id], next[id]));
-        const deletes = Object.keys(was).filter(id => !next[id]);
+      if (updates.length || deletes.length) {
         const versions = {};
-        if (inserts.length) {
-          const { data, error } = await supabase.from('bids').insert(inserts.map(id => ({ org_id: orgId, id, data: next[id], updated_by: user.id }))).select('id,version');
-          if (error) throw error; (data || []).forEach(r => { versions[r.id] = r.version; });
-        }
         for (const id of updates) {
           const expected = snap.bids[id] ? snap.bids[id].version : -1;
           const { data, error } = await supabase.from('bids').update({ data: next[id], version: expected + 1, updated_by: user.id }).eq('org_id', orgId).eq('id', id).eq('version', expected).select('version');
@@ -235,7 +238,7 @@ export function useCloudStore({ supabase, orgId, user, name, initialUi }) {
         if (deletes.length) { const { error } = await supabase.from('bids').delete().eq('org_id', orgId).in('id', deletes); if (error) throw error; }
         commit(c => {
           const bids = { ...c.bids }; const estimates = { ...c.estimates };
-          inserts.concat(updates).forEach(id => { bids[id] = { data: next[id], version: versions[id] != null ? versions[id] : ((bids[id] ? bids[id].version : 0) + 1) }; });
+          updates.forEach(id => { bids[id] = { data: next[id], version: versions[id] != null ? versions[id] : ((bids[id] ? bids[id].version : 0) + 1) }; });
           deletes.forEach(id => { delete bids[id]; delete estimates[id]; });
           return { ...c, bids, estimates };
         });

@@ -180,7 +180,7 @@ import * as R from 'react';
     var received = pkg.quotes.filter(function (q) { return q.status === 'received'; });
     var cols = [{ key: 'label', header: 'Line', width: 260, render: function (r) { return r.kind === 'total' ? 'Package total' : h('span', { className: 'gl-itemcell' }, h('span', { className: 'gl-itemcode' }, r.code), h('span', { className: 'gl-itemname' }, r.label)); } },
       { key: 'qty', header: 'Qty', type: 'number', width: 90, render: function (r) { return r.kind === 'total' ? '' : GL.fmtNum(r.qty) + ' ' + r.unit; } },
-      { key: 'plug', header: 'Plug', hint: 'until a quote is picked', type: 'money', decimals: 2, width: 110, editable: function (r) { return r.kind !== 'total'; }, placeholder: '–' }];
+      { key: 'plug', header: 'Plug', hint: 'until picked', type: 'money', decimals: 2, width: 110, editable: function (r) { return r.kind !== 'total'; }, placeholder: '–' }];
     pkg.quotes.forEach(function (q) {
       var sel = pkg.selectedQuoteId === q.id;
       cols.push({ key: q.id, type: 'money', decimals: 2, width: 170, header: h('span', { className: 'gl-qhead' + (sel ? ' is-selected' : '') }, h('span', { className: 'gl-qhead__name' }, q.vendor ? q.vendor.name : 'Vendor'), h('span', { className: 'gl-qhead__row' }, h(M.StatusChip, { status: sel ? 'selected' : q.status, label: q.lump != null && q.status === 'received' && !sel ? 'Lump sum' : undefined, size: 's' }), h(M.IconButton, { icon: q.status === 'pending' ? 'edit_note' : 'edit', label: (q.status === 'pending' ? 'Enter quote from ' : 'Edit quote from ') + (q.vendor ? q.vendor.name : 'vendor'), size: 'xs', onClick: function () { p.enter(pkg, q.id); } }))),
@@ -282,7 +282,7 @@ import * as R from 'react';
       { key: 'lock', header: 'Lock', align: 'center', width: 64, render: function (r) { return h(M.IconButton, { icon: r.locked ? 'lock' : 'lock_open', label: r.locked ? 'Unlock price' : 'Lock price', size: 'xs', toggle: true, selected: r.locked, onClick: function (e) { e.stopPropagation(); p.toggleLock(r.itemId); } }); } }
     ];
     return h('div', { className: 'gl-bidday' },
-      due >= 0 && d.bid.status !== 'submitted' ? h(M.Banner, { tone: due <= 2 ? 'warning' : 'info', compact: true }, 'Bid due ' + (due === 0 ? 'today' : due === 1 ? 'tomorrow' : 'in ' + due + ' days') + ' · ' + GL.fmtDate(d.bid.due) + ' at ' + d.bid.dueTime + '. ' + (d.errors ? d.errors + ' check' + (d.errors > 1 ? 's' : '') + ' must clear first.' : 'Checks are clear.')) : null,
+      due >= 0 && d.bid.status !== 'submitted' ? h(M.Banner, { tone: due <= 2 ? 'warning' : 'info', compact: true }, 'Bid due ' + (due === 0 ? 'today' : due === 1 ? 'tomorrow' : 'in ' + due + ' days') + ' · ' + GL.fmtDate(d.bid.due) + (d.bid.dueTime ? ' at ' + d.bid.dueTime : '') + '. ' + (d.errors ? d.errors + ' check' + (d.errors > 1 ? 's' : '') + ' must clear first.' : 'Checks are clear.')) : null,
       submitted ? h(M.Banner, { tone: 'success', compact: true }, 'Marked as submitted' + (d.bid.submittedAt ? ' ' + GL.fmtDate(d.bid.submittedAt) : '') + (d.bid.total ? ' at ' + GL.fmtMoney(d.bid.total, 2) : '') + '. Prices, markup and quantities are read-only until you reopen the bid.') : null,
       h('div', { className: 'gl-tiles' },
         h(M.StatTile, { label: 'Direct cost', value: money(d.totals.direct), supporting: GL.fmtNum(d.items.length) + ' items', icon: 'construction' }),
@@ -303,7 +303,7 @@ import * as R from 'react';
           h('div', { className: 'title-medium' }, 'Balance to a round total'),
           h('div', { className: 'body-medium gl-dim' }, 'Moves the difference onto the biggest unlocked item and locks it.'),
           h('div', { className: 'm3-row', style: { gap: 8, alignItems: 'flex-start', marginTop: 8 } },
-            h(GL.Field, { label: 'Target total', prefix: '$', value: target[0], placeholder: String(Math.round(d.totals.bidTotal / 1000) * 1000), inputMode: 'decimal', onChange: target[1], className: 'gl-field gl-field--money' }),
+            h(GL.Field, { label: 'Target total', prefix: '$', value: target[0], placeholder: GL.fmtNum(Math.round(d.totals.bidTotal / 1000) * 1000), inputMode: 'decimal', onChange: target[1], className: 'gl-field gl-field--money' }),
             h(M.Button, { variant: 'tonal', size: 's', icon: 'balance', onClick: balance, style: { marginTop: 8 } }, 'Balance')))),
       h(M.DataGrid, { label: 'Bid prices', columns: cols, rows: rows, footer: true, density: 'dense', onSelect: function (r) { p.ui.selectedItemId === r.itemId ? null : api.ui({ selectedItemId: r.itemId }); },
         onEdit: function (row, col, value) {
@@ -317,6 +317,8 @@ import * as R from 'react';
           p.toast('Price locked at ' + GL.fmtMoney(value, 2) + ' / ' + it.unit + '.', 'Undo', api.undo);
         } }),
       h('div', { className: 'gl-bidday__actions' },
+        // a button that is off says why, right next to it
+        d.errors > 0 && d.bid.status !== 'submitted' ? h('span', { className: 'gl-bidday__why body-small' }, d.errors + ' check' + (d.errors > 1 ? 's' : '') + ' must clear before this bid can be marked submitted.', h(M.Button, { variant: 'text', size: 'xs', onClick: function () { api.ui({ tab: 'checks' }); } }, 'Show checks')) : null,
         h(M.Button, { variant: 'outlined', icon: 'download', onClick: function () { p.openDialog({ kind: 'export' }); } }, 'Export budget'),
         h(M.Button, { variant: 'tonal', icon: 'description', onClick: function () { api.ui({ tab: 'form', formView: 'form' }); } }, 'Bid form'),
         d.bid.status === 'submitted' ? h(M.Button, { variant: 'filled', icon: 'lock_open', onClick: function () { p.setBidStatus('in-progress'); } }, 'Reopen bid')
@@ -376,14 +378,14 @@ import * as R from 'react';
         var crewTasks = it.tasks.filter(function (t) { return t.type === 'crew'; });
         if (!crewTasks.length) return;
         rows.push({ id: it.id, kind: 'group', label: it.code + ' ' + it.name, qty: GL.fmtNum(it.qty) + ' ' + it.unit, crew: '', production: '', days: crewTasks.reduce(function (a, t) { return a + t.days; }, 0), people: '', cost: it.direct });
-        crewTasks.forEach(function (t) { rows.push({ id: t.id, label: t.name, qty: '', crew: t.crewName || '—', production: t.production > 0 ? GL.fmtNum(t.production, t.production < 10 ? 2 : 0) + ' ' + t.unit + '/day' : '', days: t.days, people: t.people ? t.people + ' people' : '', cost: t.labor + t.equipment, depth: 1 }); });
+        crewTasks.forEach(function (t) { rows.push({ id: t.id, label: t.name, qty: '', crew: t.crewName || '—', production: t.production > 0 ? GL.fmtNum(t.production, t.production < 10 ? 2 : 0) + ' ' + t.unit + '/day' : '', days: t.days, people: t.people ? GL.peopleWord(t.people) : '', cost: t.labor + t.equipment, depth: 1 }); });
       });
       body = h('div', { 'data-money': ui.showDollarsCrew ? undefined : 'hidden', className: 'gl-crewplan' },
         h('div', { className: 'gl-crewplan__bar' },
           h('div', { className: 'body-medium' }, 'For the superintendent and foremen: what to build, with which crew, how fast. Dollar figures are hidden unless you turn them on.'),
           h(M.Switch, { label: 'Show dollars', checked: !!ui.showDollarsCrew, onChange: function (v) { api.ui({ showDollarsCrew: v }); } })),
         h(GL.Grid, { label: 'Crew plan', density: 'standard', rows: rows, empty: { icon: 'groups', headline: 'No crew work yet', body: 'Crew tasks on the Sheet show up here as a plan for the field: what to build, which crew, how fast.' }, columns: [
-          { key: 'label', header: 'Work', width: 320, render: function (r) { return r.kind === 'group' ? r.label : h('span', { style: { paddingLeft: 20 } }, r.label); } },
+          { key: 'label', header: 'Work', width: 320, render: function (r) { return h('span', { className: 'gl-treelabel' + (r.kind === 'group' ? '' : ' gl-treelabel--task') }, r.label); } },
           { key: 'qty', header: 'Quantity', width: 120 }, { key: 'crew', header: 'Crew', width: 160 }, { key: 'production', header: 'Production', width: 160 },
           { key: 'days', header: 'Crew days', type: 'number', decimals: 1, width: 100 }, { key: 'people', header: 'People', width: 90 },
           { key: 'cost', header: 'Cost', width: 120, align: 'end', render: function (r) { return h(M.Money, { value: r.cost }); } }] }));
