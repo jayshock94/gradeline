@@ -244,9 +244,35 @@ function makeXlsx() {
   check(!(await page.getByRole('button', { name: 'Create' }).isDisabled()), 'a date typed in the date field enables Create');
   await page.keyboard.press('Escape'); await page.waitForTimeout(100);
 
+  // find a bid, duplicate it, delete the copy
+  await page.getByRole('searchbox', { name: 'Find a bid' }).fill('zzzz'); await page.waitForTimeout(200);
+  check((await page.getByText('No bids match "zzzz"').count()) === 1, 'a bid search with no hits says so');
+  await page.locator('.gl-grid-empty').getByRole('button', { name: 'Clear search' }).click(); await page.waitForTimeout(150);
+  await page.getByRole('searchbox', { name: 'Find a bid' }).fill('SR-7'); await page.waitForTimeout(200);
+  check((await page.locator('.m3-grid__tr').count()) === 1, 'searching SR-7 leaves one bid');
+  await page.getByRole('button', { name: /Actions for SR-7/ }).click();
+  await page.getByRole('menuitem', { name: 'Duplicate' }).click(); await page.waitForTimeout(200);
+  check((await page.getByRole('dialog').getByText(/Quotes and locked prices start fresh/).count()) === 1, 'duplicate says what copies and what starts fresh');
+  const dupDue = page.getByRole('textbox', { name: /Bids due/ });
+  await dupDue.click(); await page.keyboard.type('12/05'); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
+  await page.getByRole('dialog').getByRole('button', { name: 'Duplicate', exact: true }).click(); await page.waitForTimeout(400);
+  check((await page.locator('.gl-estimate__title').innerText()).includes('(copy)'), 'duplicating opens the copy');
+  check((await page.locator('.m3-grid__tr').count()) > 10, 'the copy has the pay items');
+  check((await page.locator('.m3-grid__lock').count()) === 0, 'locked prices did not copy');
+  await page.getByRole('button', { name: 'Bids', exact: true }).click(); await page.waitForTimeout(200);
+  await page.getByRole('button', { name: /Actions for SR-7.*\(copy\)/ }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click(); await page.waitForTimeout(200);
+  check((await page.getByRole('dialog').getByText(/Its estimate goes with it/).count()) === 1, 'delete asks first and says what goes with it');
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete bid' }).click(); await page.waitForTimeout(300);
+  check((await page.locator('.m3-grid').getByText(/\(copy\)/).count()) === 0, 'the copy is gone from the list');
+  await page.getByRole('searchbox', { name: 'Find a bid' }).fill(''); await page.waitForTimeout(150);
+
   // library: rates from their parts, a crew built from people and machines
   await page.getByRole('button', { name: 'Library', exact: true }).click(); await page.waitForTimeout(200);
   check((await page.getByRole('tab', { name: 'Crews' }).count()) === 1, 'library renders');
+  await page.getByRole('searchbox', { name: 'Find in the library' }).fill('zzzz'); await page.waitForTimeout(200);
+  check((await page.getByText('No matches for "zzzz"').count()) === 1, 'a library search with no hits says so');
+  await page.locator('.gl-grid-empty').getByRole('button', { name: 'Clear search' }).click(); await page.waitForTimeout(150);
   await page.getByRole('tab', { name: 'Equipment' }).click();
   await page.getByRole('button', { name: 'Add machine' }).click();
   await page.getByRole('dialog').getByLabel('Machine').fill('Test roller');
