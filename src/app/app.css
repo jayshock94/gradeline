@@ -112,11 +112,15 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-bidday { display: flex; flex-direction: column; gap: 16px; }
 .gl-bidday__controls { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
 .gl-markup { display: flex; gap: 12px; flex-wrap: wrap; }
-.gl-field { --m3-field-bg: var(--surface-container-low); }
+/* the label sits on the field's border, so its backing has to match whatever the field sits on */
+.gl-field, .gl-select { --m3-field-bg: var(--surface); }
+.gl-card .gl-field, .gl-card .gl-select { --m3-field-bg: var(--surface-container-low); }
+.m3-dialog .gl-field, .m3-dialog .gl-select { --m3-field-bg: var(--surface-container-high); }
 .gl-field--pct { width: 150px; }
 .gl-field--money { width: 200px; }
 .gl-field--short { width: 160px; }
-.gl-bidday__actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+.gl-bidday__actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+.gl-bidday__why { flex: 1 1 260px; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; color: var(--on-surface-variant); }
 
 /* checks */
 .gl-checks { display: flex; flex-direction: column; gap: 16px; max-width: 960px; }
@@ -155,17 +159,16 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-export__bar .body-small { flex: 1 1 260px; padding-top: 8px; }
 
 /* library */
-.gl-library { flex-direction: row; gap: 20px; align-items: flex-start; }
-.gl-library__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.gl-library { flex-direction: row; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.gl-library__main { flex: 1 1 1140px; min-width: 0; display: flex; flex-direction: column; gap: 12px; } /* 1140px: room for the widest table (crews), so the setup card drops below instead of squeezing it */
 .gl-library__bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.gl-library__side { width: 320px; flex: none; display: flex; flex-direction: column; gap: 12px; }
+.gl-library__side { flex: 1 1 320px; max-width: 520px; display: flex; flex-direction: column; gap: 12px; }
 /* stacked: stretch, or a wide grid makes the whole page scroll sideways */
-@media (max-width: 1100px) { .gl-library { flex-direction: column; align-items: stretch; } .gl-library__main { width: auto; max-width: 100%; } .gl-library__side { width: auto; } }
+@media (max-width: 1100px) { .gl-library { flex-direction: column; flex-wrap: nowrap; align-items: stretch; } .gl-library__main { flex: none; width: auto; max-width: 100%; } .gl-library__side { flex: none; width: auto; max-width: none; } }
 
 /* insights */
-.gl-insights { display: grid; grid-template-columns: 1.4fr 1fr; gap: 24px; }
+.gl-insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(640px, 100%), 1fr)); gap: 24px; }
 .gl-insights > :first-child { grid-column: 1 / -1; }
-@media (max-width: 900px) { .gl-insights { grid-template-columns: 1fr; } }
 .gl-chart { width: 100%; max-width: 760px; height: auto; display: block; }
 .gl-chart__grid { stroke: var(--outline-variant); stroke-width: 1; }
 .gl-chart__tick { fill: var(--on-surface-variant); font-size: 11px; font-family: var(--font-plain); }
@@ -181,12 +184,14 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 
 /* no-estimate state */
 .gl-nobid { max-width: 560px; text-align: center; display: flex; flex-direction: column; align-items: center; }
+.gl-nobid .m3-empty__action { flex-wrap: wrap; justify-content: center; }
 
 /* select, dialogs, snackbar */
-.gl-select { display: inline-flex; flex-direction: column; gap: 4px; min-width: 200px; }
-.gl-select__label { font-size: 12px; line-height: 16px; letter-spacing: 0.4px; color: var(--on-surface-variant); padding-left: 4px; }
+/* a select reads as an outlined field: same height, label on the border, so it lines up beside text fields */
+.gl-select { position: relative; display: inline-flex; flex-direction: column; gap: 4px; min-width: 200px; }
+.gl-select__label { position: absolute; top: 0; left: 12px; translate: 0 -50%; z-index: 1; padding: 0 4px; font-size: 12px; line-height: 16px; letter-spacing: 0.4px; color: var(--on-surface-variant); background: var(--m3-field-bg); white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; }
 .gl-select__box { position: relative; display: flex; align-items: center; }
-.gl-select__box select { appearance: none; -webkit-appearance: none; width: 100%; height: 48px; padding: 0 44px 0 16px; border: 1px solid var(--outline); border-radius: var(--corner-extra-small); background: transparent; color: var(--on-surface); font: inherit; letter-spacing: inherit; cursor: pointer; }
+.gl-select__box select { appearance: none; -webkit-appearance: none; width: 100%; height: 56px; padding: 0 44px 0 16px; border: 1px solid var(--outline); border-radius: var(--corner-extra-small); background: transparent; color: var(--on-surface); font: inherit; letter-spacing: inherit; cursor: pointer; }
 .gl-select__box select:focus-visible { outline: var(--focus-ring-width) solid var(--secondary); outline-offset: 2px; border-color: var(--primary); }
 .gl-select__box .m3-icon { position: absolute; right: 12px; pointer-events: none; color: var(--on-surface-variant); }
 .gl-select__support { font-size: 12px; line-height: 16px; letter-spacing: 0.4px; color: var(--on-surface-variant); padding-left: 16px; }
@@ -228,13 +233,14 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-snack.is-compact { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); width: calc(100% - 32px); }
 .gl-snack.is-compact .m3-snackbar { min-width: 0; width: 100%; }
 .m3-dialog-layer { padding: 16px; }
-.m3-dialog { max-height: calc(100% - 32px); overflow: auto; }
+.m3-dialog { max-height: calc(100% - 32px); overflow: hidden; }
+/* a long form scrolls inside the dialog; Cancel and Save stay in view (the padding keeps labels and focus rings from being clipped) */
+.m3-dialog__content { overflow: auto; min-height: 0; padding: 8px 4px 2px; margin: -8px -4px -2px; }
+.m3-dialog__headline, .m3-dialog__icon, .m3-dialog__actions { flex: none; }
 
 /* compact */
 @media (max-width: 839px) {
   .gl-bidday__controls { grid-template-columns: 1fr; }
-  .gl-estimate__kpis .gl-kpi:not(.gl-kpi--total) { display: none; } /* the bid total always stays in view */
-  .gl-estimate__kpis .gl-kpi--total .gl-kpi__label { display: none; }
   .gl-paper { padding: 20px 16px; }
   .gl-dialog__form { min-width: 0; }
   .gl-dialog--wide { width: auto; }
@@ -322,7 +328,11 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .m3-grid::-webkit-scrollbar-thumb { background: var(--outline-variant); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
 .m3-grid::-webkit-scrollbar-track { background: transparent; }
 .gl-pkg__note { padding: var(--space-2) var(--space-3) 0; }
-@media (max-width: 480px) { .gl-dialog__form .m3-segmented { flex-wrap: wrap; } .gl-dialog__form .m3-segmented__seg { flex: 1 1 45%; } }
+@media (max-width: 480px) {
+  .gl-dialog__form .m3-segmented:has(.m3-segmented__seg:nth-child(4)) { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; border-radius: 0; }
+  .gl-dialog__form .m3-segmented:has(.m3-segmented__seg:nth-child(4)) .m3-segmented__seg { border-radius: var(--corner-full); margin-left: 0; min-width: 0; }
+  .gl-form__bar .m3-segmented__seg .m3-icon { display: none; } /* three documents fit the phone without their icons */
+}
 /* phones: grids are sized for a desk, so the name column would take the whole screen and hide every number.
    Cap it (the grid sets widths inline, hence !important) and let the sheet scroll with the page, not inside a small box. */
 @media (max-width: 600px) {
@@ -359,3 +369,32 @@ body { margin: 0; background: var(--surface); color: var(--on-surface); font-fam
 .gl-readquote__busy { display: flex; align-items: center; gap: 12px; min-height: 32px; }
 .gl-readquote__paste { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .gl-readquote__paste .m3-field { width: 100%; }
+
+/* ===== small screens and small fixes ===== */
+/* a label beside the tree toggle: when it wraps, the second line lines up under the first */
+.gl-treelabel { display: inline-block; vertical-align: middle; white-space: normal; max-width: calc(100% - 24px); box-sizing: border-box; }
+.gl-treelabel--task { padding-left: 20px; }
+@media (max-width: 600px) { .gl-treelabel--task { padding-left: 0; } }
+.gl-who { display: flex; flex-direction: column; line-height: 18px; min-width: 0; }
+.gl-who__name, .gl-who__org { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 216px; }
+.gl-who__org { font-size: 12px; letter-spacing: 0.4px; }
+.m3-menu__item:has(.gl-who) { height: 56px; }
+.m3-menu__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 600px) {
+  /* app bar: the mark and the screen name; the wordmark would crowd out the title */
+  .gl-appbar__brand, .gl-appbar__sep { display: none; }
+  .gl-appbar__screen { color: var(--on-surface); font-size: 18px; }
+  /* estimate header: the bid name gets its own line; total and margin sit under it */
+  .gl-estimate__titles { flex: 1 1 100%; }
+  .gl-estimate__title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .gl-estimate__kpis { flex: 1 1 100%; gap: 16px; }
+  .gl-estimate__kpis .gl-kpi { align-items: flex-start; }
+  .gl-estimate__kpis .gl-kpi + .m3-iconbtn, .gl-estimate__kpis .gl-kpi + button { margin-left: auto; }
+  /* five tabs fit a phone once they stop padding themselves */
+  .gl-estimate .m3-tabs__tab { padding: 0 4px; min-width: 0; }
+  /* bids: search and New bid share one row */
+  .gl-filterbar__right { flex: 1 1 100%; flex-wrap: nowrap; }
+  .gl-filterbar__right .gl-searchbox { flex: 1 1 auto; }
+  .gl-library__bar .m3-row { width: 100%; }
+  .gl-library__bar .gl-searchbox { flex: 1 1 100%; }
+}

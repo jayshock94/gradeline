@@ -7,6 +7,8 @@ const MAX_HISTORY = 80;
 
 export const DEFAULT_UI = { screen: 'bids', tab: 'sheet', theme: 'system', fieldMode: false, railExpanded: false, selectedItemId: null, expanded: {}, sheetView: 'pricing', paneTab: 'summary', formView: 'form', libTab: 'crews', bidFilter: 'all', showDollarsCrew: false };
 
+// What comes back from a saved session: where you were, but not a search you typed or a panel left open over the page.
+export function restoreUi(saved) { const u = { ...DEFAULT_UI, ...(saved || {}) }; delete u.bidQuery; delete u.libQuery; delete u.paneModal; return u; }
 export function clone(o) { return JSON.parse(JSON.stringify(o)); }
 export function nowLabel() { return new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); }
 
@@ -15,7 +17,7 @@ function load() {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw);
-    return s && s.stack && s.stack.length ? s : null;
+    return s && s.stack && s.stack.length ? { ...s, ui: restoreUi(s.ui) } : null;
   } catch (e) { return null; }
 }
 function save(s) { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch (e) { /* storage unavailable: in memory only */ } }

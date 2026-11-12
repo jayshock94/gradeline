@@ -38,9 +38,9 @@ import * as R from 'react';
     });
     var rows = list.map(function (b) { var ds = GL.dueStatus(b); return { id: b.id, name: b.name, location: b.location, owner: b.owner, type: b.type, due: b.due, dueTime: b.dueTime, dueChip: ds, estimator: b.estimator, total: totals[b.id], status: b.status, live: !!doc.estimates[b.id], selected: ui.bidId === b.id, lowBid: b.lowBid, note: b.note }; });
     var cols = [
-      { key: 'name', header: 'Bid', width: 320, render: function (r) { return h('span', { className: 'gl-bidcell' }, h('span', { className: 'gl-bidcell__name' }, r.name, r.live ? h(M.Icon, { name: 'edit_document', size: 16, className: 'gl-livemark', label: 'Has an estimate' }) : null), h('span', { className: 'gl-bidcell__sub body-small' }, r.location + (r.note ? ' · ' + r.note : ''))); } },
+      { key: 'name', header: 'Bid', width: 320, render: function (r) { return h('span', { className: 'gl-bidcell' }, h('span', { className: 'gl-bidcell__name' }, r.name, r.live ? h(M.Icon, { name: 'edit_document', size: 16, className: 'gl-livemark', label: 'Has an estimate' }) : null), h('span', { className: 'gl-bidcell__sub body-small' }, [r.location, r.note].filter(Boolean).join(' · '))); } },
       { key: 'owner', header: 'Owner', width: 200, render: function (r) { return h('span', null, r.owner, h('span', { className: 'gl-dim' }, r.type === 'public' ? ' · public' : ' · private')); } },
-      { key: 'due', header: 'Due', width: 150, render: function (r) { return h('span', { className: 'gl-duecell' }, h('span', { className: 'gl-duecell__date' }, GL.fmtDate(r.due) + ' · ' + r.dueTime), r.dueChip ? h(M.StatusChip, { status: r.dueChip.status, label: r.dueChip.label }) : null); } },
+      { key: 'due', header: 'Due', width: 150, render: function (r) { return h('span', { className: 'gl-duecell' }, h('span', { className: 'gl-duecell__date' }, GL.fmtDate(r.due) + (r.dueTime ? ' · ' + r.dueTime : '')), r.dueChip ? h(M.StatusChip, { status: r.dueChip.status, label: r.dueChip.label }) : null); } },
       { key: 'estimator', header: 'Estimator', width: 110 },
       { key: 'total', header: 'Bid total', type: 'money', width: 130, render: function (r) { return r.total ? h(Frag, null, h(M.Money, { value: r.total }), r.lowBid ? h('span', { className: 'gl-dim body-small' }, ' low ' + GL.fmtMoney(r.lowBid)) : null) : h('span', { className: 'gl-dim' }, 'not priced'); } },
       { key: 'status', header: 'Status', width: 130, render: function (r) { return h(M.StatusChip, { status: r.status }); } },
@@ -74,13 +74,20 @@ import * as R from 'react';
     var doc = p.doc, ui = p.ui, api = p.api, width = p.width;
     var bidId = ui.bidId || doc.currentBidId;
     var bid = doc.bids.find(function (b) { return b.id === bidId; });
+    var contentRef = useRef(null);
+    useEffect(function () {
+      var el = contentRef.current; if (!el) return;
+      el.scrollTop = 0;
+      var target = el.querySelector('.gl-pkg.is-focus') || el.querySelector('.m3-grid__tr.is-selected');
+      if (target && (ui.focusPackageId || ui.selectedItemId) && target.scrollIntoView) target.scrollIntoView({ block: 'center' });
+    }, [ui.tab, bidId, ui.focusPackageId]);
     if (!bid) return h(M.EmptyState, { icon: 'folder_open', headline: 'Pick a bid', body: 'Open a bid from the Bids list to work on its estimate.', action: h(M.Button, { onClick: function () { api.ui({ screen: 'bids' }); } }, 'Go to bids') });
     if (!doc.estimates[bidId]) {
       return h('div', { className: 'gl-screen gl-screen--center' },
         h('div', { className: 'gl-nobid' },
           h(M.StatusChip, { status: bid.status, size: 'm' }),
           h('h2', { className: 'headline-small', style: { margin: '12px 0 4px' } }, bid.name),
-          h('div', { className: 'body-medium gl-dim' }, bid.owner + ' · due ' + GL.fmtDate(bid.due) + ' at ' + bid.dueTime + (bid.total ? ' · ' + GL.fmtMoney(bid.total) : '')),
+          h('div', { className: 'body-medium gl-dim' }, bid.owner + ' · due ' + GL.fmtDate(bid.due) + (bid.dueTime ? ' at ' + bid.dueTime : '') + (bid.total ? ' · ' + GL.fmtMoney(bid.total) : '')),
           bid.lowBid && bid.total ? h('div', { className: 'body-medium gl-dim' }, 'Low bid ' + GL.fmtMoney(bid.lowBid) + ' (' + ((bid.total / bid.lowBid - 1) * 100).toFixed(1) + '% spread)') : null,
           p.demo && ['won', 'lost', 'submitted', 'no-bid'].indexOf(bid.status) >= 0
             ? h(M.EmptyState, { size: 's', icon: 'inventory_2', headline: 'This bid is archived in the sample', body: 'In the real product you would open its estimate, compare it with the actual costs, and copy items into a new bid.' })
@@ -102,15 +109,15 @@ import * as R from 'react';
         h('div', { className: 'gl-estimate__head' },
           h('div', { className: 'gl-estimate__titles' },
             h('h1', { className: 'gl-estimate__title' }, bid.name),
-            h('div', { className: 'gl-estimate__meta body-small' }, bid.owner + ' · ' + bid.estimator + ' · ', h(M.StatusChip, { status: bid.status }), ds ? h(M.StatusChip, { status: ds.status, label: ds.label }) : null)),
+            h('div', { className: 'gl-estimate__meta body-small' }, [bid.owner, bid.estimator].filter(Boolean).join(' · ') + ' · ', h(M.StatusChip, { status: bid.status }), ds ? h(M.StatusChip, { status: ds.status, label: ds.label }) : null)),
           h('div', { className: 'gl-estimate__kpis' },
             p.peers && p.peers.length ? h('div', { className: 'gl-peers', title: p.peers.map(function (x) { return x.name; }).join(', ') + ' also here' }, p.peers.slice(0, 3).map(function (x, i) { return h('span', { key: i, className: 'm3-avatar gl-avatar gl-peer' }, x.initials); }), h('span', { className: 'body-small gl-dim' }, p.peers.length === 1 ? p.peers[0].name.split(' ')[0] + ' is here' : p.peers.length + ' others here')) : null,
             h('div', { className: 'gl-kpi gl-kpi--total' }, h('span', { className: 'gl-kpi__label' }, 'Bid total'), h('span', { className: 'gl-kpi__value' }, money(d.totals.bidTotal))),
             h('div', { className: 'gl-kpi' }, h('span', { className: 'gl-kpi__label' }, 'Margin'), h('span', { className: 'gl-kpi__value' }, d.totals.margin.toFixed(1) + '%')),
             h(M.IconButton, { icon: 'edit', label: 'Edit bid details', onClick: function () { p.openDialog({ kind: 'editbid', bidId: bid.id }); } }),
             h(M.IconButton, { icon: showPane ? 'right_panel_close' : 'right_panel_open', label: showPane ? 'Hide summary' : 'Show summary', toggle: true, selected: showPane, onClick: function () { wide ? api.ui({ paneOpen: !showPane }) : api.ui({ paneModal: !showPane }); } }))),
-        h(M.Tabs, { tabs: tabs, value: tab, onChange: function (v) { api.ui({ tab: v }); }, label: 'Estimate sections', scrollable: width < 700 }),
-        h('div', { className: 'gl-estimate__content' + (tab === 'sheet' ? ' gl-estimate__content--fill' : '') }, content)),
+        h(M.Tabs, { tabs: tabs, value: tab, onChange: function (v) { api.ui({ tab: v }); }, label: 'Estimate sections', scrollable: width < 340 }),
+        h('div', { ref: contentRef, className: 'gl-estimate__content' + (tab === 'sheet' ? ' gl-estimate__content--fill' : '') }, content)),
       wide && showPane ? h(GL.SidePane, Object.assign({}, common, { stack: p.stack, index: p.index })) : null,
       !wide && showPane ? h(M.SideSheet, { modal: true, headline: 'Summary', onClose: function () { api.ui({ paneModal: false }); } }, h(GL.SidePane, Object.assign({}, common, { stack: p.stack, index: p.index }))) : null);
   }
@@ -136,7 +143,7 @@ import * as R from 'react';
       p.toast('Deleted ' + rec.name + '.', 'Undo', api.undo);
     }
     function actions(kind) {
-      return { key: 'actions', header: '', width: 48, align: 'center', render: function (r) {
+      return { key: 'actions', header: '', width: 40, align: 'center', render: function (r) {
         var rec = lib[kind].find(function (x) { return x.id === r.id; });
         return h(M.IconButton, { icon: 'more_vert', label: 'Actions for ' + r.name, size: 'xs', onClick: function (e) { e.stopPropagation(); menu.open(e, [{ icon: 'edit', label: 'Edit', onClick: function () { p.openDialog({ kind: 'libedit', target: kind, id: r.id }); } }, { divider: true }, { icon: 'delete', label: 'Delete', onClick: function () { remove(kind, rec); } }], 'Actions'); } });
       } };
@@ -168,8 +175,8 @@ import * as R from 'react';
     var money2 = function (key, header, hint, editable) { return { key: key, header: header, hint: hint, type: 'money', decimals: 2, width: 120, editable: editable, placeholder: '–' }; };
     var grids = {
       crews: h(GL.Grid, { label: 'Crews', density: 'standard', filtered: libFiltered(), rows: lib.crews.slice().sort(byName).map(function (c) { var r = d.crewRates[c.id] || GL.crewRate(c, lib); return { id: c.id, name: c.name, makeup: c.labor.map(function (x) { var l = lib.labor.find(function (y) { return y.id === x[0]; }); return x[1] + ' ' + (l ? l.name.toLowerCase() : '?'); }).join(', '), iron: c.equipment.map(function (x) { var e = lib.equipment.find(function (y) { return y.id === x[0]; }); return x[1] + ' ' + (e ? e.name : '?'); }).join(', '), hours: c.hours || 8, laborDay: r.laborPerDay, equipDay: r.equipPerDay, perDay: r.perDay }; }).filter(matches), columns: [
-        { key: 'name', header: 'Crew', width: 170 }, { key: 'makeup', header: 'People', width: 180 }, { key: 'iron', header: 'Equipment', width: 190 },
-        { key: 'hours', header: 'Hours/day', type: 'number', width: 96, editable: true }, { key: 'laborDay', header: 'Labor/day', type: 'money', category: 'labor', width: 108 }, { key: 'equipDay', header: 'Equip/day', type: 'money', category: 'equipment', width: 108 }, { key: 'perDay', header: 'Crew/day', type: 'money', width: 108 }, actions('crews')],
+        { key: 'name', header: 'Crew', width: 150 }, { key: 'makeup', header: 'People', width: 160 }, { key: 'iron', header: 'Equipment', width: 176 },
+        { key: 'hours', header: 'Hours/day', type: 'number', width: 80, editable: true }, { key: 'laborDay', header: 'Labor/day', type: 'money', category: 'labor', width: 92 }, { key: 'equipDay', header: 'Equip/day', type: 'money', category: 'equipment', width: 92 }, { key: 'perDay', header: 'Crew/day', type: 'money', width: 92 }, actions('crews')],
         empty: { icon: 'groups', headline: 'No crews yet', body: 'A crew is people plus machines. Add one and the day rate adds up as you build it.', action: h(M.Button, { icon: 'add', onClick: function () { p.openDialog({ kind: 'libedit', target: 'crews' }); } }, 'Add crew') },
         onEdit: function (row, col, value) { if (!(value > 0) || value > 24) { p.toast('Hours per day go from 1 to 24.'); return; } api.update(function (dd) { dd.library.crews.find(function (c) { return c.id === row.id; }).hours = value; }, { title: 'Set ' + row.name + ' to ' + value + ' hours/day', icon: 'schedule' }); } }),
       labor: h(GL.Grid, { label: 'Labor rates', density: 'standard', filtered: libFiltered(), rows: lib.labor.slice().sort(byName).map(function (l) { var rate = GL.laborRate(l); return { id: l.id, name: l.name, wage: l.wage, burden: l.wage != null ? l.burden || 0 : null, rate: rate, day: rate * 8, built: l.wage != null }; }).filter(matches), columns: [
@@ -190,7 +197,7 @@ import * as R from 'react';
       materials: h(GL.Grid, { label: 'Materials', density: 'standard', filtered: libFiltered(), rows: lib.materials.slice().sort(byName).map(function (m) { return { id: m.id, name: m.name, unit: m.unit, cost: m.cost }; }).filter(matches), columns: [{ key: 'name', header: 'Material', width: 260 }, { key: 'unit', header: 'Unit', width: 80, align: 'center' }, { key: 'cost', header: 'Cost', type: 'money', decimals: 2, width: 120, editable: true }, actions('materials')],
         empty: { icon: 'inventory_2', headline: 'No materials yet', body: 'Pipe, base, asphalt: a cost per unit that tasks and quotes can use.', action: libEmptyActions('materials', 'Add material') },
         onEdit: function (row, col, value) { setField('materials', row, 'cost', value); } }),
-      vendors: h(GL.Grid, { label: 'Subs and suppliers', density: 'standard', filtered: libFiltered(), rows: lib.vendors.slice().sort(byName).map(function (v) { return { id: v.id, name: v.name, trade: v.trade, kind: v.kind, contact: v.contact, email: v.email, phone: v.phone }; }).filter(matches), columns: [{ key: 'name', header: 'Company', width: 220 }, { key: 'trade', header: 'Trade', width: 170 }, { key: 'kind', header: 'Type', width: 100, render: function (r) { return r.kind === 'supplier' ? 'Supplier' : 'Sub'; } }, { key: 'contact', header: 'Contact', width: 150 }, { key: 'phone', header: 'Phone', width: 130 }, { key: 'email', header: 'Email', width: 220 }, actions('vendors')],
+      vendors: h(GL.Grid, { label: 'Subs and suppliers', density: 'standard', filtered: libFiltered(), rows: lib.vendors.slice().sort(byName).map(function (v) { return { id: v.id, name: v.name, trade: v.trade, kind: v.kind, contact: v.contact, email: v.email, phone: v.phone }; }).filter(matches), columns: [{ key: 'name', header: 'Company', width: 190 }, { key: 'trade', header: 'Trade', width: 150 }, { key: 'kind', header: 'Type', width: 80, render: function (r) { return r.kind === 'supplier' ? 'Supplier' : 'Sub'; } }, { key: 'contact', header: 'Contact', width: 130 }, { key: 'phone', header: 'Phone', width: 120 }, { key: 'email', header: 'Email', width: 200 }, actions('vendors')],
         empty: { icon: 'storefront', headline: 'No subs or suppliers yet', body: 'The companies you get prices from. Their quotes line up side by side on each bid.', action: libEmptyActions('vendors', 'Add company') } })
     };
     var anyEstimate = Object.keys(doc.estimates).some(function (k) { return doc.estimates[k] && doc.estimates[k].items && doc.estimates[k].items.length; });
@@ -248,10 +255,10 @@ import * as R from 'react';
           h('div', { className: 'gl-legend body-small' }, h('span', null, h('i', { className: 'gl-legend__sw gl-legend__sw--bid' }), 'Submitted'), h('span', null, h('i', { className: 'gl-legend__sw gl-legend__sw--won' }), 'Won'))),
         h(GL.Section, { title: 'By owner' },
           h(GL.Grid, { label: 'Results by owner', density: 'standard', rows: ins.byOwner.map(function (o) { return { id: o.owner, owner: o.owner, bid: o.bid, won: o.won, rate: o.won / o.bid * 100, margin: o.margin }; }), columns: [
-            { key: 'owner', header: 'Owner', width: 160 }, { key: 'bid', header: 'Bid', type: 'number', width: 70 }, { key: 'won', header: 'Won', type: 'number', width: 70 }, { key: 'rate', header: 'Win rate', type: 'percent', decimals: 0, width: 90 }].concat(computed ? [] : [{ key: 'margin', header: 'Avg margin', type: 'percent', decimals: 1, width: 100 }]), empty: { icon: 'emoji_events', headline: 'No decided bids yet', body: 'Mark bids won or lost on the Bids list and each owner shows up here with a win rate.' } })),
+            { key: 'owner', header: 'Owner', width: 150 }, { key: 'bid', header: 'Bid', type: 'number', width: 60 }, { key: 'won', header: 'Won', type: 'number', width: 60 }, { key: 'rate', header: 'Win rate', type: 'percent', decimals: 0, width: 80 }].concat(computed ? [] : [{ key: 'margin', header: 'Avg margin', type: 'percent', decimals: 1, width: 96 }]), empty: { icon: 'emoji_events', headline: 'No decided bids yet', body: 'Mark bids won or lost on the Bids list and each owner shows up here with a win rate.' } })),
         h(GL.Section, { title: 'Unit cost trend', subtitle: 'Your own bids, so the next estimate starts from what you actually priced.' },
           h(GL.Grid, { label: 'Unit cost trend', density: 'standard', rows: ins.unitTrend.map(function (u) { return { id: u.item, item: u.item, unit: u.unit, bids: u.bids, avg: u.avg, low: u.low, high: u.high }; }), columns: [
-            { key: 'item', header: 'Item', width: 200 }, { key: 'unit', header: 'Unit', width: 60, align: 'center' }, { key: 'bids', header: 'Bids', type: 'number', width: 60 }, { key: 'avg', header: 'Avg cost', type: 'money', decimals: 2, width: 100 }, { key: 'low', header: 'Low', type: 'money', decimals: 2, width: 90 }, { key: 'high', header: 'High', type: 'money', decimals: 2, width: 90 }], empty: { icon: 'trending_up', headline: 'No trend yet', body: 'Shows once the same pay item is priced in two or more estimates.' } })),
+            { key: 'item', header: 'Item', width: 150 }, { key: 'unit', header: 'Unit', width: 44, align: 'center' }, { key: 'bids', header: 'Bids', type: 'number', width: 44 }, { key: 'avg', header: 'Avg cost', type: 'money', decimals: 2, width: 80 }, { key: 'low', header: 'Low', type: 'money', decimals: 2, width: 64 }, { key: 'high', header: 'High', type: 'money', decimals: 2, width: 64 }], empty: { icon: 'trending_up', headline: 'No trend yet', body: 'Shows once the same pay item is priced in two or more estimates.' } })),
         h(GL.Section, { title: 'Why we lost' },
           ins.lossReview.length ? h('ul', { className: 'gl-losses' }, ins.lossReview.map(function (l) { return h('li', { key: l.bid }, h('div', { className: 'gl-losses__head' }, h('span', { className: 'title-small' }, l.bid), h(M.StatusChip, { status: 'lost', label: '+' + l.spread + '% over low' })), h('div', { className: 'body-small gl-dim' }, l.note)); })) : h('div', { className: 'body-small gl-dim' }, 'Add the low bid to a lost bid and it shows up here with the spread.'))));
   }
@@ -416,7 +423,7 @@ import * as R from 'react';
         h(M.SegmentedButton, { label: 'Task type', value: v.type, onChange: function (x) { set('type', x); }, segments: [{ value: 'crew', label: 'Crew', icon: 'groups' }, { value: 'material', label: 'Material', icon: 'inventory_2' }, { value: 'sub', label: 'Sub / supplier', icon: 'request_quote' }, { value: 'other', label: 'Other', icon: 'receipt_long' }] }),
         h(GL.Field, { label: 'Task', value: v.name, onChange: function (x) { set('name', x); }, required: true, placeholder: v.type === 'crew' ? 'Excavate and haul' : v.type === 'material' ? 'Base material' : v.type === 'sub' ? 'Pipe supply' : 'Dump fees' }),
         v.type === 'crew' ? (lib.crews.length ? h(Frag, null,
-          h(GL.Select, { label: 'Crew', value: v.crewId, options: lib.crews.map(function (c) { return { value: c.id, label: c.name }; }), onChange: function (x) { set('crewId', x); }, supporting: crewRate ? GL.fmtMoney(crewRate.perDay) + ' per ' + crewRate.hours + '-hour day, ' + crewRate.people + ' people' : '' }),
+          h(GL.Select, { label: 'Crew', value: v.crewId, options: lib.crews.map(function (c) { return { value: c.id, label: c.name }; }), onChange: function (x) { set('crewId', x); }, supporting: crewRate ? GL.fmtMoney(crewRate.perDay) + ' per ' + crewRate.hours + '-hour day, ' + GL.peopleWord(crewRate.people) : '' }),
           h(GL.Field, { label: 'Production', value: v.production, inputMode: 'decimal', suffix: (item ? item.unit : 'units') + ' / day', onChange: function (x) { set('production', x); }, required: true, supportingText: item && N(v.production) > 0 && crewRate ? GL.fmtNum(item.qty / N(v.production), 1) + ' crew days · ' + GL.fmtMoney(item.qty / N(v.production) * crewRate.perDay) : 'How much the crew finishes in a day' })) : goLibrary('crews')) : null,
         v.type === 'material' ? (lib.materials.length ? h(Frag, null,
           h(GL.Select, { label: 'Material', value: v.matId, options: lib.materials.map(function (m) { return { value: m.id, label: m.name + ' · ' + GL.fmtMoney(m.cost, 2) + '/' + m.unit }; }), onChange: function (x) { set('matId', x); } }),
@@ -701,7 +708,7 @@ import * as R from 'react';
         rowsOf('labor', 'People', 'Add labor classes on the Labor tab first.'),
         rowsOf('equipment', 'Machines', 'Add machines on the Equipment tab first.'),
         h('div', { className: 'gl-crewtotal' },
-          h('span', null, 'Labor ', h('b', null, GL.fmtMoney(rate.laborPerDay))), h('span', null, 'Equipment ', h('b', null, GL.fmtMoney(rate.equipPerDay))), h('span', { className: 'title-small' }, 'Crew day ' + GL.fmtMoney(rate.perDay) + ' · ' + rate.people + ' people'))));
+          h('span', null, 'Labor ', h('b', null, GL.fmtMoney(rate.laborPerDay))), h('span', null, 'Equipment ', h('b', null, GL.fmtMoney(rate.equipPerDay))), h('span', { className: 'title-small' }, 'Crew day ' + GL.fmtMoney(rate.perDay) + ' · ' + GL.peopleWord(rate.people)))));
   }
 
   function LibEditDialog(p) {
@@ -817,6 +824,7 @@ import * as R from 'react';
         if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z') { if (typing) return; e.preventDefault(); if (e.shiftKey) api.redo(); else api.undo(); return; }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { if (typing) return; e.preventDefault(); api.redo(); return; }
         if (dialog[0] && e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); dialog[1](null); return; }
+        if (!dialog[0] && e.key === 'Escape' && !e.defaultPrevented && ui.paneModal && ui.screen === 'estimate' && !document.querySelector('[role="menu"]')) { e.preventDefault(); api.ui({ paneModal: false }); return; }
         if (typing || dialog[0] || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
         if (e.target.closest && e.target.closest('.m3-grid, [role="menu"], [role="dialog"]') && /^[1-5lL]$/.test(e.key)) return;
         if (e.key === '?') { e.preventDefault(); dialog[1]({ kind: 'shortcuts' }); }
@@ -825,7 +833,11 @@ import * as R from 'react';
       }
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
-    }, [ui.selectedItemId, ui.screen, dialog[0], d]);
+    }, [ui.selectedItemId, ui.screen, ui.paneModal, dialog[0], d]);
+
+    // a new screen starts at its top, not wherever the last one was scrolled to
+    var mainRef = useRef(null);
+    useEffect(function () { if (mainRef.current) mainRef.current.scrollTop = 0; }, [ui.screen, ui.bidId]);
 
     /* ----- document actions ----- */
     function curEst(doc) { return doc.estimates[doc.currentBidId]; }
@@ -1043,20 +1055,20 @@ import * as R from 'react';
       menu.node,
       compact ? null : h(M.NavigationRail, { items: navItems, value: screen, onChange: function (v) { api.ui({ screen: v }); }, expanded: ui.railExpanded !== false && width >= 1100, onMenu: width >= 1100 ? function () { api.ui({ railExpanded: ui.railExpanded === false }); } : undefined, fab: 'add', fabLabel: 'New bid', onFab: function () { dialog[1]({ kind: 'newbid' }); }, label: 'Main', className: 'gl-rail' }),
       h('div', { className: 'gl-main' },
-        h(M.TopAppBar, { className: 'gl-appbar', title: h('span', { className: 'gl-appbar__title' }, compact ? null : h(GL.Mark, null), h('span', { className: 'gl-appbar__brand' }, 'Benchstake'), h('span', { className: 'gl-appbar__sep' }, '/'), h('span', { className: 'gl-appbar__screen' }, titles[screen])),
+        h(M.TopAppBar, { className: 'gl-appbar', title: h('span', { className: 'gl-appbar__title' }, h(GL.Mark, null), h('span', { className: 'gl-appbar__brand' }, 'Benchstake'), h('span', { className: 'gl-appbar__sep' }, '/'), h('span', { className: 'gl-appbar__screen' }, titles[screen])),
           actions: h(Frag, null,
             session.onInvite ? (compact ? h(M.IconButton, { icon: 'person_add', label: 'Invite someone', onClick: function () { dialog[1]({ kind: 'invite' }); } }) : h(M.Button, { variant: 'tonal', size: 'xs', onClick: function () { dialog[1]({ kind: 'invite' }); } }, 'Invite')) : null,
             h(GL.Tip, { text: ui.fieldMode ? 'Show dollars' : 'Hide dollars (field mode)' }, h(M.IconButton, { icon: ui.fieldMode ? 'visibility_off' : 'visibility', label: ui.fieldMode ? 'Show dollars' : 'Hide dollars', toggle: true, selected: !!ui.fieldMode, onClick: function () { api.ui({ fieldMode: !ui.fieldMode }); toast(ui.fieldMode ? 'Dollars shown.' : 'Field mode: every amount is hidden until you turn it back on.'); } })),
             h(GL.Tip, { text: 'Theme' }, h(M.IconButton, { icon: themeIcon, label: 'Theme', onClick: function (e) { menu.open(e, [['system', 'Match system', 'contrast'], ['light', 'Light', 'light_mode'], ['dark', 'Dark', 'dark_mode'], ['sunlight', 'Sunlight (outdoor tablet)', 'wb_sunny']].map(function (t) { return { label: t[1], icon: t[2], selected: (ui.theme || 'system') === t[0], onClick: function () { api.ui({ theme: t[0] }); } }; }), 'Theme'); } })),
-            h(GL.Tip, { text: 'Keyboard shortcuts (?)' }, h(M.IconButton, { icon: 'keyboard', label: 'Keyboard shortcuts', onClick: function () { dialog[1]({ kind: 'shortcuts' }); } })),
+            compact ? null : h(GL.Tip, { text: 'Keyboard shortcuts (?)' }, h(M.IconButton, { icon: 'keyboard', label: 'Keyboard shortcuts', onClick: function () { dialog[1]({ kind: 'shortcuts' }); } })),
             h(M.IconButton, { icon: h('span', { className: 'm3-avatar gl-avatar' }, session.initials || 'MR'), label: 'Account', onClick: function (e) { menu.open(e, [
-              { label: (session.name || 'Maya R.') + (session.orgName ? ' · ' + session.orgName : ' · Sample company'), icon: 'person', disabled: true },
+              { label: h('span', { className: 'gl-who' }, h('span', { className: 'gl-who__name' }, session.name || 'Maya R.'), h('span', { className: 'gl-who__org' }, session.orgName || 'Sample company')), icon: 'person', disabled: true },
               { label: 'Settings', icon: 'settings', onClick: function () { api.ui({ screen: 'settings' }); } },
               { divider: true },
               api.reset ? { label: 'Reset sample data', icon: 'restart_alt', onClick: function () { api.reset(); toast('Sample data reset.'); } } : null,
               session.onSignOut ? { label: 'Sign out', icon: 'logout', onClick: session.onSignOut } : null].filter(Boolean), 'Account'); } })) }),
         notices.length ? h('div', { className: 'gl-notices' }, notices) : null,
-        h('main', { className: 'gl-content' }, content),
+        h('main', { ref: mainRef, className: 'gl-content' }, content),
         compact ? h(M.NavigationBar, { items: navItems, value: screen, onChange: function (v) { api.ui({ screen: v }); }, label: 'Main', className: 'gl-navbar' }) : null),
       dlgNode,
       snack[0] ? h('div', { className: 'gl-snack' + (compact ? ' is-compact' : '') }, h(M.Snackbar, { message: snack[0].msg, action: snack[0].action, onAction: function () { if (snack[0].onAction) snack[0].onAction(); snack[1](null); }, onClose: function () { snack[1](null); } })) : null);

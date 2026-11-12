@@ -303,7 +303,7 @@ function makeXlsx() {
   await page.getByRole('dialog').getByLabel('Crew name').fill('Test crew');
   await page.getByRole('button', { name: 'Add people' }).click();
   await page.getByRole('button', { name: 'Add machine' }).click();
-  check((await page.getByText(/Crew day \$[\d,]+ · 1 people/).count()) === 1, 'the crew builder adds up the day rate');
+  check((await page.getByText(/Crew day \$[\d,]+ · 1 person/).count()) === 1, 'the crew builder adds up the day rate');
   await page.getByRole('dialog').getByRole('button', { name: 'Add crew' }).click(); await page.waitForTimeout(200);
   check((await page.getByRole('row', { name: /Test crew/ }).count()) === 1, 'a new crew shows in the library');
   await shot('05b-library');
@@ -329,6 +329,13 @@ function makeXlsx() {
   check((await page.getByText(/License UT 123456-5501/).count()) === 1, 'the bid form prints the license number');
   await page.getByRole('button', { name: 'Insights' }).click(); await page.waitForTimeout(200);
   check((await page.getByText('Bids and wins by month').count()) === 1, 'insights renders');
+  // a new screen opens at its top, and the library shows its day rates without scrolling sideways
+  await page.evaluate(() => { const c = document.querySelector('.gl-content'); c.scrollTop = c.scrollHeight; });
+  const scrolledTo = await page.evaluate(() => document.querySelector('.gl-content').scrollTop);
+  await page.getByRole('button', { name: 'Library', exact: true }).click(); await page.waitForTimeout(250);
+  check(scrolledTo > 0 && (await page.evaluate(() => document.querySelector('.gl-content').scrollTop)) === 0, 'a new screen opens at its top, not where the last one was scrolled');
+  check(await page.evaluate(() => { const g = document.querySelector('.gl-library .m3-grid'); const th = g && [...g.querySelectorAll('.m3-grid__th')].find(x => /Crew\/day/.test(x.textContent)); return !!th && th.getBoundingClientRect().right <= g.getBoundingClientRect().right + 1; }), 'library: the crew day rate is on screen, not cut off');
+  await page.getByRole('button', { name: 'Insights' }).click(); await page.waitForTimeout(200);
   await page.getByRole('button', { name: 'Account' }).click();
   check((await page.getByRole('menuitem', { name: 'Reset sample data' }).count()) === 1, 'account menu has reset in demo mode');
   await page.keyboard.press('Escape');
@@ -352,6 +359,24 @@ function makeXlsx() {
   fit = await phoneFit('.gl-sheet > .m3-grid');
   check(fit.over <= 1 && fit.first > 0 && fit.first < 0.6, 'phone: the sheet shows numbers next to the pay item column (' + JSON.stringify(fit) + ')');
   check(fit.inner <= 1, 'phone: the sheet scrolls with the page, not inside a small box');
+
+  // phone: the bid name is whole, all five tabs are on screen, long dialogs keep their buttons in view
+  const inView = async loc => { const b = await loc.boundingBox(); const vp = page.viewportSize(); return !!b && b.x >= -1 && b.x + b.width <= vp.width + 1 && b.y >= -1 && b.y + b.height <= vp.height + 1; };
+  check(await page.evaluate(() => { const t = document.querySelector('.gl-estimate__title'); return t.scrollWidth <= t.clientWidth + 1 && t.scrollHeight <= t.clientHeight + 1; }), 'phone: the bid name is not cut off');
+  check(await inView(page.getByRole('tab', { name: /Form/ })), 'phone: all five estimate tabs are on screen');
+  check((await page.locator('.gl-kpi').count()) === 2 && await inView(page.locator('.gl-kpi').nth(1)), 'phone: margin stays in view next to the total');
+  await page.getByRole('button', { name: 'Edit bid details' }).click(); await page.waitForTimeout(200);
+  check(await inView(page.getByRole('dialog').getByRole('button', { name: 'Save' })), 'phone: a long dialog keeps Save in view');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  await page.getByRole('button', { name: 'Show summary' }).click(); await page.waitForTimeout(200);
+  check((await page.locator('.m3-ssheet--modal').count()) === 1, 'phone: the summary opens as a sheet');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+  check((await page.locator('.m3-ssheet--modal').count()) === 0, 'Escape closes the summary sheet');
+  await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
+  await page.getByRole('row', { name: /Alpine Loop/ }).click(); await page.waitForTimeout(300);
+  check(await inView(page.getByRole('button', { name: 'Paste item list' })) && await inView(page.getByRole('button', { name: 'Start blank' })), 'phone: every way to start an estimate is on screen');
+  await page.locator('.m3-navbar').getByRole('button', { name: 'Bids' }).click(); await page.waitForTimeout(300);
+  await page.getByRole('row', { name: /SR-7 Mill/ }).click(); await page.waitForTimeout(300);
 
   // open another bid, undo, then edit: the edit stays on the bid on screen and nothing crashes
   await page.setViewportSize({ width: 1440, height: 900 }); await page.waitForTimeout(200);

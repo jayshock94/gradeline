@@ -205,6 +205,7 @@ import { GL } from './gl.js';
     return null;
   };
 
+  GL.peopleWord = function (n) { return n + (n === 1 ? ' person' : ' people'); };
   GL.initials = function (name) {
     var src = String(name || '').trim() || '?';
     var parts = src.replace(/[._@-]+/g, ' ').split(/\s+/).filter(Boolean);

@@ -61,5 +61,22 @@ r = res(); await readQuote({ method: 'POST', body: { text: 'x', package: pkg } }
 check(r.code === 503 && /not switched on/.test(r.body.error), 'without a key the reader says it is not switched on');
 globalThis.fetch = realFetch;
 
+// --- saving: a bid made together with its estimate (Duplicate) goes in bid first, because the estimate row points at its bid
+{
+  const { applyUpdate } = await import('../server/store.js');
+  const db = { bids: {}, estimates: {}, log: [] };
+  const q = (table) => {
+    const b = { eq() { return b; }, in() { return b; }, select() { return b; },
+      single: async () => ({ data: { data: {}, version: 1 }, error: null }),
+      insert(rows) { rows.forEach(r => { db.bids[r.id] = r; db.log.push('bid ' + r.id); }); return Promise.resolve({ error: null }); },
+      then(ok) { return Promise.resolve({ data: table === 'bids' ? Object.values(db.bids).map(r => ({ id: r.id, data: r.data, version: 1 })) : [], error: null }).then(ok); } };
+    return b;
+  };
+  const sb = { from: q, rpc: async (fn, a) => { const bid = a.p_scope.slice(9); if (!db.bids[bid]) return { data: null, error: { message: 'violates foreign key constraint' } }; db.estimates[bid] = a.p_doc; db.log.push('estimate ' + bid); return { data: 1, error: null }; } };
+  let err = null;
+  try { await applyUpdate(sb, 'o1', { id: 'u1' }, d => { d.bids.push({ id: 'B9', name: 'Copy', owner: 'UDOT', due: '2026-12-01' }); d.estimates.B9 = { items: [{ id: 'I1', name: 'x', qty: 1, unit: 'EA' }], tasks: [], packages: [], markup: {}, locks: {} }; }, { title: 'Duplicated' }); } catch (e) { err = e; }
+  check(!err && db.log.join(', ') === 'bid B9, estimate B9', 'a new bid is saved before its estimate (' + (err ? err.message : db.log.join(', ')) + ')');
+}
+
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall good');
 process.exit(fails ? 1 : 0);
