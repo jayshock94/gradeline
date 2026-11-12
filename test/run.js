@@ -356,8 +356,10 @@ function makeXlsx() {
   check((await page.locator('.gl-screen .m3-grid').count()) === 0 && bidCount >= 5, 'phone: the bids are a list, not a table (' + bidCount + ' rows)');
   const firstBid = page.locator('.m3-dlist__item').first();
   check((await firstBid.locator('.m3-status').count()) >= 1 && (await firstBid.locator('.m3-dlist__trail').count()) === 1 && await page.evaluate(() => { const li = document.querySelector('.m3-dlist__item'); const t = li.querySelector('.m3-dlist__trail').getBoundingClientRect(); return t.right <= window.innerWidth && t.left >= 0; }), 'phone: each bid shows its status and total without scrolling sideways');
+  // nothing floats over the list, and nothing on the screen is cut off at its right edge
+  check(await page.evaluate(() => { const vw = window.innerWidth; return [...document.querySelectorAll('.gl-screen .m3-stat, .gl-screen .m3-chip, .gl-screen .m3-btn, .gl-screen .m3-search')].every(el => { const b = el.getBoundingClientRect(); return b.width === 0 || (b.left >= -1 && b.right <= vw + 1); }) && getComputedStyle(document.querySelector('.gl-screen .m3-btn')).position !== 'fixed'; }), 'phone: tiles, chips, search and New bid all sit fully on screen');
   await page.getByRole('button', { name: 'New bid' }).click(); await page.waitForTimeout(200);
-  check((await page.getByRole('dialog').getByLabel('Project name').count()) === 1, 'phone: the floating New bid button opens the new bid form');
+  check((await page.getByRole('dialog').getByLabel('Project name').count()) === 1, 'phone: New bid opens the new bid form');
   await page.keyboard.press('Escape'); await page.waitForTimeout(150);
   await page.getByRole('button', { name: /^Actions for SR-7/ }).click(); await page.waitForTimeout(150);
   check((await page.getByRole('menuitem', { name: 'Duplicate' }).count()) === 1 && (await page.locator('.gl-estimate').count()) === 0, 'phone: the row menu opens without opening the bid');

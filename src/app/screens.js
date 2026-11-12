@@ -37,7 +37,7 @@ import * as R from 'react';
       if (act(a) !== act(b)) return act(a) - act(b);
       return act(a) === 0 ? (a.due < b.due ? -1 : 1) : (a.due < b.due ? 1 : -1);
     });
-    var rows = list.map(function (b) { var ds = GL.dueStatus(b); return { id: b.id, name: b.name, location: b.location, owner: b.owner, type: b.type, due: b.due, dueTime: b.dueTime, dueChip: ds, estimator: b.estimator, total: totals[b.id], status: b.status, live: !!doc.estimates[b.id], selected: ui.bidId === b.id, lowBid: b.lowBid, note: b.note }; });
+    var rows = list.map(function (b) { var ds = GL.dueStatus(b); return { id: b.id, name: b.name, location: b.location, owner: b.owner, type: b.type, due: b.due, dueTime: b.dueTime, dueChip: ds, estimator: b.estimator, total: totals[b.id], status: b.status, live: !!doc.estimates[b.id], selected: !asList && ui.bidId === b.id, lowBid: b.lowBid, note: b.note }; });
     var cols = [
       { key: 'name', header: 'Bid', width: 320, role: 'title', render: function (r) { return h('span', { className: 'gl-bidcell' }, h('span', { className: 'gl-bidcell__name' }, r.name, r.live ? h(M.Icon, { name: 'edit_document', size: 16, className: 'gl-livemark', label: 'Has an estimate' }) : null), h('span', { className: 'gl-bidcell__sub body-small' }, [r.location, r.note].filter(Boolean).join(' · '))); } },
       { key: 'where', role: 'subtitle', listOnly: true, listRender: function (r) { return [r.owner, r.location].filter(Boolean).join(' · '); } },
@@ -53,22 +53,21 @@ import * as R from 'react';
         { icon: 'delete', label: 'Delete', onClick: function () { p.openDialog({ kind: 'deletebid', bidId: r.id }); } }], 'Actions'); } }); } }
     ];
     var winRate = decided.length ? Math.round(won.length / decided.length * 100) : 0;
-    return h('div', { className: 'gl-screen' + (asList ? ' gl-screen--fab' : '') },
+    return h('div', { className: 'gl-screen' },
       menu.node,
       ui.hideSampleNote || !p.demo ? null : h(M.Banner, { tone: 'neutral', compact: true, icon: 'science', onClose: function () { api.ui({ hideSampleNote: true }); } }, 'Sample data for a fictional contractor, Cascade Civil Constructors. Change anything; every change can be undone, and the account menu resets it.'),
-      h('div', { className: 'gl-tiles' + (asList ? ' gl-tiles--scroll' : '') },
+      // phones skip the tiles (the list is the screen); the two counts that matter ride on their filter chips instead
+      asList ? null : h('div', { className: 'gl-tiles' },
         h(M.StatTile, { label: 'Open bids', value: String(open.length), icon: 'folder_open', supporting: open.filter(function (b) { return b.status === 'in-progress'; }).length + ' in progress', onClick: function () { api.ui({ bidFilter: 'open' }); } }),
         h(M.StatTile, { label: 'Due this week', value: String(dueWeek.length), tone: dueWeek.length ? 'warning' : 'default', icon: 'schedule', supporting: dueWeek.length ? 'next: ' + dueWeek.sort(function (a, b) { return a.due < b.due ? -1 : 1; })[0].name.split(',')[0] : 'nothing due', onClick: function () { api.ui({ bidFilter: 'due' }); } }),
         h(M.StatTile, { label: 'Win rate', value: String(winRate), unit: '%', supporting: won.length + ' of ' + decided.length + ' decided', icon: 'emoji_events', onClick: function () { api.ui({ screen: 'insights' }); } }),
         h(M.StatTile, { label: 'Won this year', value: money(backlog), icon: 'payments', supporting: wonYear.length + ' job' + (wonYear.length === 1 ? '' : 's') })),
       h('div', { className: 'gl-filterbar' },
-        h('div', { className: 'm3-row' }, [['all', 'All'], ['open', 'Open'], ['due', 'Due this week'], ['submitted', 'Submitted'], ['won', 'Won'], ['lost', 'Lost']].map(function (f) { return h(M.Chip, { key: f[0], variant: 'filter', label: f[1], selected: filter === f[0], onClick: function () { api.ui({ bidFilter: f[0] }); } }); })),
+        h('div', { className: 'm3-row' }, [['all', 'All'], ['open', 'Open' + (asList ? ' · ' + open.length : '')], ['due', 'Due this week' + (asList ? ' · ' + dueWeek.length : '')], ['submitted', 'Submitted'], ['won', 'Won'], ['lost', 'Lost']].map(function (f) { return h(M.Chip, { key: f[0], variant: 'filter', label: f[1], selected: filter === f[0], onClick: function () { api.ui({ bidFilter: f[0] }); } }); })),
         h('div', { className: 'm3-row gl-filterbar__right' },
           h(M.Search, { className: 'gl-searchbox', placeholder: 'Find a bid', label: 'Find a bid', value: ui.bidQuery || '', onChange: function (v) { api.ui({ bidQuery: v }); }, trailing: (ui.bidQuery || '') ? h(M.IconButton, { icon: 'close', size: 'xs', label: 'Clear search', onClick: function () { api.ui({ bidQuery: '' }); } }) : null }),
-          asList ? null : h(M.Button, { variant: 'filled', icon: 'add', size: 's', onClick: function () { p.openDialog({ kind: 'newbid' }); } }, 'New bid'))),
+          h(M.Button, { variant: 'filled', icon: 'add', size: 's', onClick: function () { p.openDialog({ kind: 'newbid' }); } }, 'New bid'))),
       asList && rows.length ? h('div', { className: 'body-small gl-dim gl-listcount' }, rows.length === doc.bids.length ? rows.length + ' bid' + (rows.length === 1 ? '' : 's') : rows.length + ' of ' + doc.bids.length + ' bids') : null,
-      // on a phone the one main action floats above the bottom bar, in reach of a thumb
-      asList ? h('div', { className: 'gl-fab' }, h(M.ExtendedFAB, { icon: 'add', label: 'New bid', color: 'primary', onClick: function () { p.openDialog({ kind: 'newbid' }); } })) : null,
       h(GL.Grid, { label: 'Bids', columns: cols, rows: rows, density: 'standard', asList: asList, onSelect: function (r) { p.openBid(r.id); },
         empty: { icon: 'post_add', headline: 'No bids yet', body: 'Start with the project name, the owner and the date bids are due. The estimate comes next.', action: h(M.Button, { icon: 'add', onClick: function () { p.openDialog({ kind: 'newbid' }); } }, 'New bid') },
         filtered: { active: filter !== 'all' || !!query, headline: query ? 'No bids match "' + (ui.bidQuery || '').trim() + '"' : 'No ' + ({ open: 'open bids', due: 'bids due this week', submitted: 'submitted bids', won: 'won bids', lost: 'lost bids' }[filter] || 'bids match'), body: query ? 'Check the spelling, try fewer words, or clear the search.' : 'Nothing in this list has that status right now.', onClear: function () { api.ui({ bidFilter: 'all', bidQuery: '' }); }, clearLabel: query ? 'Clear search' : 'Show all bids' } }));
@@ -825,6 +824,7 @@ import * as R from 'react';
 
     function toast(msg, action, onAction) { snack[1]({ id: Date.now(), msg: msg, action: action, onAction: onAction }); }
     useEffect(function () { if (!snack[0]) return; var t = setTimeout(function () { snack[1](null); }, 6000); return function () { clearTimeout(t); }; }, [snack[0]]);
+    useEffect(function () { if (dialog[0]) snack[1](null); }, [dialog[0]]); // opening a dialog clears the last toast, which would sit on its buttons on a phone
 
     // keyboard
     useEffect(function () {
@@ -1081,7 +1081,7 @@ import * as R from 'react';
         h('main', { ref: mainRef, className: 'gl-content' }, content),
         compact ? h(M.NavigationBar, { items: navItems, value: screen, onChange: function (v) { api.ui({ screen: v }); }, label: 'Main', className: 'gl-navbar' }) : null),
       dlgNode,
-      snack[0] ? h('div', { className: 'gl-snack' + (compact ? ' is-compact' : '') + (width < 600 && screen === 'bids' ? ' has-fab' : '') }, h(M.Snackbar, { message: snack[0].msg, action: snack[0].action, onAction: function () { if (snack[0].onAction) snack[0].onAction(); snack[1](null); }, onClose: function () { snack[1](null); } })) : null);
+      snack[0] ? h('div', { className: 'gl-snack' + (compact ? ' is-compact' : '') }, h(M.Snackbar, { message: snack[0].msg, action: snack[0].action, onAction: function () { if (snack[0].onAction) snack[0].onAction(); snack[1](null); }, onClose: function () { snack[1](null); } })) : null);
   }
 
   GL.App = App;
